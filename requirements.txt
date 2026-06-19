@@ -1,0 +1,4 @@
+pyinstaller==6.21.0
+pystray==0.19.5
+pillow==12.2.0
+

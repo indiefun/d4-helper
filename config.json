@@ -1,0 +1,23 @@
+{
+  "window_title_contains": "暗黑破坏神IV",
+  "process_name": "Diablo IV.exe",
+  "right_hold_enabled": true,
+  "right_hold_trigger": "xbutton1",
+  "left_click_loop_enabled": true,
+  "left_click_loop_trigger": "xbutton2",
+  "left_click_interval_ms": 100,
+  "right_click_loop_enabled": false,
+  "right_click_loop_trigger": "f3",
+  "right_click_interval_ms": 100,
+  "skill_loop_enabled": false,
+  "skill_loop_key": "1",
+  "skill_loop_interval_ms": 500,
+  "f1_combo_enabled": true,
+  "f1_combo_trigger": "f1",
+  "f1_combo_interval_ms": 80,
+  "poll_interval_ms": 100,
+  "overlay_enabled": true,
+  "overlay_x": 20,
+  "overlay_y": 20,
+  "overlay_opacity": 0.62
+}
