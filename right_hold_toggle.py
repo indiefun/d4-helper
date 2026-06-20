@@ -23,7 +23,7 @@ except Exception:
     ImageDraw = None
 
 
-APP_NAME = "暗黑4鼠标助手"
+APP_NAME = "D4Helper"
 
 
 def app_dir() -> Path:
@@ -443,7 +443,7 @@ class OverlayWindow:
         self.canvas.create_text(
             12,
             12,
-            text="暗黑4助手",
+            text="D4Helper",
             fill="#d6d6d6",
             font=("Microsoft YaHei UI", 10, "bold"),
             anchor="nw",

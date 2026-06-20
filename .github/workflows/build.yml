@@ -1,15 +1,14 @@
-name: Build Windows EXE
+name: Build D4Helper
 
 on:
   push:
     branches:
       - main
       - master
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
-  release:
-    types:
-      - published
 
 jobs:
   build-windows:
@@ -31,22 +30,40 @@ jobs:
       - name: Syntax check
         run: python -m py_compile right_hold_toggle.py
 
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath .\VERSION -Raw).Trim()
+          "version=$version" >> $env:GITHUB_OUTPUT
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match VERSION v$version"
+          }
+
       - name: Build executable
         shell: pwsh
         run: ./build.ps1
 
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path .\dist\D4Helper.exe, .\dist\config.json, .\dist\VERSION -DestinationPath ".\dist\D4Helper-v${{ steps.version.outputs.version }}-windows.zip" -Force
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: D4MouseHelper-windows
+          name: D4Helper-v${{ steps.version.outputs.version }}-windows
           path: |
-            dist/GameMouseTool.exe
+            dist/D4Helper.exe
             dist/config.json
+            dist/VERSION
+            dist/D4Helper-v${{ steps.version.outputs.version }}-windows.zip
 
-      - name: Attach files to release
-        if: github.event_name == 'release'
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
+          name: D4Helper ${{ github.ref_name }}
+          generate_release_notes: true
           files: |
-            dist/GameMouseTool.exe
-            dist/config.json
+            dist/D4Helper-v${{ steps.version.outputs.version }}-windows.zip

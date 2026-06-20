@@ -1,4 +1,4 @@
-# 暗黑4鼠标助手
+# D4Helper
 
 一个针对《暗黑破坏神 IV》的 Windows 轻量鼠标辅助工具。
 
@@ -13,13 +13,13 @@
 ## 运行
 
 ```powershell
-.\dist\GameMouseTool.exe
+.\dist\D4Helper.exe
 ```
 
 拷贝到其他 Windows 电脑时，把这两个文件放在一起：
 
 ```text
-GameMouseTool.exe
+D4Helper.exe
 config.json
 ```
 
@@ -114,8 +114,17 @@ python -m pip install pyinstaller pystray pillow
 输出：
 
 ```text
-dist\GameMouseTool.exe
+dist\D4Helper.exe
 dist\config.json
+dist\VERSION
+```
+
+版本号记录在 [VERSION](VERSION)。
+
+本地构建会读取 `VERSION`，并把版本写入：
+
+```text
+dist\VERSION
 ```
 
 ## GitHub Actions
@@ -131,15 +140,40 @@ dist\config.json
 - push 到 `main` 或 `master`
 - pull request
 - 手动运行 workflow
-- 发布 GitHub Release
+- push `v*` 标签，例如 `v0.1.0`
 
 每次构建会上传 artifact：
 
 ```text
-D4MouseHelper-windows
+D4Helper-v版本号-windows
 ```
 
-发布 Release 时会自动把 `GameMouseTool.exe` 和 `config.json` 附加到 Release 资产里。
+推送 tag 时会自动创建 GitHub Release，并上传：
+
+```text
+D4Helper-v版本号-windows.zip
+```
+
+## 版本升级与发布
+
+发布新版本时：
+
+1. 修改 [VERSION](VERSION)，例如改成 `0.2.0`。
+2. 提交版本号和代码改动。
+3. 创建与 `VERSION` 对应的 tag，格式必须是 `v版本号`。
+4. 推送 tag。
+
+示例：
+
+```powershell
+git add VERSION README.md
+git commit -m "Bump version to 0.2.0"
+git tag v0.2.0
+git push
+git push origin v0.2.0
+```
+
+GitHub Actions 会校验 tag 和 [VERSION](VERSION) 是否匹配。例如 `VERSION` 是 `0.2.0` 时，tag 必须是 `v0.2.0`。
 
 ## 注意
 
