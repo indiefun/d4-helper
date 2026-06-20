@@ -10,20 +10,26 @@ import sys
 import threading
 import time
 import tkinter as tk
+import urllib.error
+import urllib.request
+import webbrowser
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
 
 try:
     import pystray
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageTk
 except Exception:
     pystray = None
     Image = None
     ImageDraw = None
+    ImageTk = None
 
 
 APP_NAME = "D4Helper"
+GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/indiefun/d4-helper/releases/latest"
+GITHUB_RELEASES_URL = "https://github.com/indiefun/d4-helper/releases/latest"
 
 
 def app_dir() -> Path:
@@ -32,7 +38,30 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def resource_path(relative_path: str) -> Path:
+    base = Path(getattr(sys, "_MEIPASS", app_dir()))
+    return base / relative_path
+
+
 CONFIG_PATH = app_dir() / "config.json"
+DONATE_IMAGE_PATH = resource_path("assets/donate.jpg")
+VERSION_PATH = app_dir() / "VERSION"
+BUNDLED_VERSION_PATH = resource_path("VERSION")
+
+
+def read_app_version() -> str:
+    for path in (VERSION_PATH, BUNDLED_VERSION_PATH):
+        try:
+            version = path.read_text(encoding="utf-8").strip()
+            if version:
+                return version.lstrip("v")
+        except OSError:
+            pass
+    return "unknown"
+
+
+APP_VERSION = read_app_version()
+APP_TITLE = f"{APP_NAME} v{APP_VERSION}" if APP_VERSION != "unknown" else APP_NAME
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -509,7 +538,7 @@ class ConfigWindow:
         self.command_queue = command_queue
         self.config_path = config_path
         self.window = root
-        self.window.title(APP_NAME)
+        self.window.title(APP_TITLE)
         self.window.resizable(False, False)
         self.window.protocol("WM_DELETE_WINDOW", self.hide)
 
@@ -522,7 +551,10 @@ class ConfigWindow:
         self.overlay_opacity_var = tk.DoubleVar()
         self.overlay_opacity_text_var = tk.StringVar()
         self.status_var = tk.StringVar()
+        self.version_status_var = tk.StringVar(value=f"当前版本：v{APP_VERSION}")
+        self.latest_release_url = GITHUB_RELEASES_URL
         self.macro_vars: list[dict[str, object]] = []
+        self.donate_image: object | None = None
 
         self._build()
         self.load_from_engine()
@@ -595,6 +627,21 @@ class ConfigWindow:
         ttk.Label(overlay, text="轮询间隔").grid(row=4, column=0, sticky="w", **pad)
         ttk.Spinbox(overlay, from_=50, to=1000, increment=10, textvariable=self.poll_interval_var, width=10).grid(row=4, column=1, sticky="w", **pad)
 
+        update = ttk.LabelFrame(main, text="版本更新")
+        update.pack(fill="x", pady=(0, 8))
+        update.columnconfigure(0, weight=1)
+        ttk.Label(update, textvariable=self.version_status_var, foreground="#555555").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Button(update, text="检查更新", command=self.check_update).grid(row=0, column=1, sticky="e", **pad)
+        ttk.Button(update, text="查看更新", command=self.open_release_page).grid(row=0, column=2, sticky="e", **pad)
+
+        support = ttk.LabelFrame(main, text="支持项目")
+        support.pack(fill="x")
+        support.columnconfigure(0, weight=1)
+        self._help_label(support, "如果这个工具对你有帮助，可以扫码打赏支持。二维码只用于自愿支持，不影响任何功能。").grid(row=0, column=0, sticky="nw", **pad)
+        donate_label = self._donate_label(support)
+        if donate_label is not None:
+            donate_label.grid(row=0, column=1, sticky="e", padx=8, pady=8)
+
     def _macro_row(self, parent: tk.Widget, row: int, index: int, trigger_values: list[str], action_values: list[str], press_values: list[str], interval_values: list[str]) -> None:
         pad = {"padx": 5, "pady": 4}
         vars_for_row = {
@@ -616,6 +663,36 @@ class ConfigWindow:
         for offset, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
             ttk.Combobox(parent, textvariable=vars_for_row[slot_name], values=press_values, state="readonly", width=6).grid(row=row, column=4 + offset, sticky="w", **pad)
         ttk.Combobox(parent, textvariable=vars_for_row["interval"], values=interval_values, state="readonly", width=13).grid(row=row, column=8, sticky="w", **pad)
+
+    def _donate_label(self, parent: tk.Widget) -> ttk.Label | None:
+        if Image is None or ImageTk is None or not DONATE_IMAGE_PATH.exists():
+            return None
+        image = Image.open(DONATE_IMAGE_PATH)
+        image.thumbnail((150, 150))
+        self.donate_image = ImageTk.PhotoImage(image)
+        return ttk.Label(parent, image=self.donate_image)
+
+    def check_update(self) -> None:
+        self.version_status_var.set(f"当前版本：v{APP_VERSION}，正在检查更新...")
+        threading.Thread(target=self._check_update_worker, name="check-update", daemon=True).start()
+
+    def _check_update_worker(self) -> None:
+        try:
+            latest_version, release_url = fetch_latest_release()
+            self.root.after(0, lambda: self._show_update_result(latest_version, release_url))
+        except Exception as exc:
+            error_message = str(exc)
+            self.root.after(0, lambda: self.version_status_var.set(f"当前版本：v{APP_VERSION}，更新检查失败：{error_message}"))
+
+    def _show_update_result(self, latest_version: str, release_url: str) -> None:
+        self.latest_release_url = release_url
+        if is_newer_version(latest_version, APP_VERSION):
+            self.version_status_var.set(f"当前版本：v{APP_VERSION}，发现新版本：v{latest_version}")
+        else:
+            self.version_status_var.set(f"当前版本：v{APP_VERSION}，已是最新版本")
+
+    def open_release_page(self) -> None:
+        webbrowser.open(self.latest_release_url)
 
     def load_from_engine(self) -> None:
         config = self.engine.snapshot().config
@@ -738,6 +815,51 @@ def interval_ms_to_label(interval_ms: int) -> str:
         if ms == interval_ms:
             return label
     return INTERVAL_PRESETS["standard"][0]
+
+
+def parse_version(version: str) -> tuple[int, ...]:
+    normalized = version.strip().lstrip("vV")
+    parts: list[int] = []
+    for part in normalized.split("."):
+        digits = ""
+        for char in part:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts or [0])
+
+
+def is_newer_version(latest: str, current: str) -> bool:
+    latest_parts = parse_version(latest)
+    current_parts = parse_version(current)
+    max_len = max(len(latest_parts), len(current_parts))
+    latest_parts += (0,) * (max_len - len(latest_parts))
+    current_parts += (0,) * (max_len - len(current_parts))
+    return latest_parts > current_parts
+
+
+def fetch_latest_release() -> tuple[str, str]:
+    request = urllib.request.Request(
+        GITHUB_LATEST_RELEASE_API,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": APP_NAME,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.URLError as exc:
+        raise RuntimeError("网络不可用或 GitHub 访问失败") from exc
+
+    data = json.loads(raw)
+    tag_name = str(data.get("tag_name", "")).strip()
+    if not tag_name:
+        raise RuntimeError("未读取到最新版本号")
+    release_url = str(data.get("html_url", "")).strip() or GITHUB_RELEASES_URL
+    return tag_name.lstrip("vV"), release_url
 
 
 def default_macros() -> list[MacroConfig]:
