@@ -42,12 +42,12 @@
       "interval_ms": 100
     },
     {
-      "enabled": false,
-      "name": "空宏",
+      "enabled": true,
+      "name": "右键连点",
       "trigger": "f2",
-      "action": "none",
+      "action": "press_cycle",
       "sequence": [
-        "none",
+        "right",
         "none",
         "none",
         "none"

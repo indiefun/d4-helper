@@ -45,6 +45,7 @@ def resource_path(relative_path: str) -> Path:
 
 CONFIG_PATH = app_dir() / "config.json"
 DONATE_IMAGE_PATH = resource_path("assets/donate.jpg")
+APP_ICON_PATH = resource_path("assets/app-icon.png")
 VERSION_PATH = app_dir() / "VERSION"
 BUNDLED_VERSION_PATH = resource_path("VERSION")
 
@@ -539,6 +540,7 @@ class ConfigWindow:
         self.config_path = config_path
         self.window = root
         self.window.title(APP_TITLE)
+        self._set_window_icon()
         self.window.resizable(False, False)
         self.window.protocol("WM_DELETE_WINDOW", self.hide)
 
@@ -563,6 +565,16 @@ class ConfigWindow:
 
     def _help_label(self, parent: tk.Widget, text: str) -> ttk.Label:
         return ttk.Label(parent, text=text, foreground="#666666", wraplength=760, justify="left")
+
+    def _set_window_icon(self) -> None:
+        if Image is None or ImageTk is None or not APP_ICON_PATH.exists():
+            return
+        try:
+            icon = ImageTk.PhotoImage(Image.open(APP_ICON_PATH))
+            self.window.iconphoto(True, icon)
+            self.window_icon = icon
+        except Exception:
+            pass
 
     def _fit_to_content(self) -> None:
         self.window.update_idletasks()
@@ -867,7 +879,7 @@ def default_macros() -> list[MacroConfig]:
         MacroConfig(True, "右键长按", "xbutton1", ACTION_HOLD, ["right", "none", "none", "none"], 100),
         MacroConfig(True, "左键连点", "xbutton2", ACTION_PRESS_CYCLE, ["left", "none", "none", "none"], 100),
         MacroConfig(True, "2/3连按", "f1", ACTION_PRESS_CYCLE, ["2", "3", "none", "none"], 100),
-        MacroConfig(False, "空宏", "f2", ACTION_NONE, ["none", "none", "none", "none"], 100),
+        MacroConfig(True, "右键连点", "f2", ACTION_PRESS_CYCLE, ["right", "none", "none", "none"], 100),
     ]
 
 
@@ -1143,10 +1155,13 @@ def create_tray_icon(command_queue: queue.Queue[str]) -> object | None:
     if pystray is None or Image is None or ImageDraw is None:
         return None
 
-    image = Image.new("RGB", (64, 64), "#202124")
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((10, 10, 54, 54), radius=10, fill="#2f7de1")
-    draw.rectangle((28, 18, 36, 46), fill="#ffffff")
+    if APP_ICON_PATH.exists():
+        image = Image.open(APP_ICON_PATH).resize((64, 64))
+    else:
+        image = Image.new("RGB", (64, 64), "#221a15")
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((6, 6, 58, 58), radius=12, fill="#4a1915", outline="#d8a84e", width=3)
+        draw.text((18, 20), "D4", fill="#ffeab4")
 
     def show_config(_icon: object, _item: object) -> None:
         command_queue.put("show")
