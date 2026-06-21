@@ -66,16 +66,20 @@ VERSION
 - 循环槽位
 - 间隔档位
 
-可选开关键：
+开关键可以从下拉框选择，也可以直接输入。每个开关键输入框右侧都有“录”按钮，点击后按一次目标键即可录入。
+
+常用开关键：
 
 - 侧键 1
 - 侧键 2
-- F1
-- F2
-- F3
-- F4
-- F5
-- F6
+- 鼠标中键
+- F1-F12
+- 数字 0-9
+- 字母 A-Z
+- 空格、Tab、Enter、Backspace
+- Shift、Ctrl、Alt、CapsLock
+- Insert、Delete、Home、End、PageUp、PageDown
+- 方向键
 
 可选动作：
 
@@ -86,13 +90,18 @@ VERSION
 槽位支持：
 
 - 无
-- 1
-- 2
-- 3
-- 4
-- 空格
 - 左键
 - 右键
+- 鼠标中键
+- 数字 0-9
+- 字母 A-Z
+- F1-F12
+- 空格、Tab、Enter、Backspace
+- Shift、Ctrl、Alt、CapsLock
+- Insert、Delete、Home、End、PageUp、PageDown
+- 方向键
+
+每个槽位输入框右侧也有“录”按钮。录入按键时，按 Esc 可以取消。左键可以作为槽位动作使用，但不能作为宏开关键，避免点击界面时误触发。
 
 ### 自动按住
 

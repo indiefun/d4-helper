@@ -74,17 +74,42 @@ WS_EX_TOOLWINDOW = 0x00000080
 
 VK_XBUTTON1 = 0x05
 VK_XBUTTON2 = 0x06
+VK_BACK = 0x08
+VK_TAB = 0x09
+VK_RETURN = 0x0D
+VK_SHIFT = 0x10
+VK_CONTROL = 0x11
+VK_MENU = 0x12
+VK_CAPITAL = 0x14
 VK_SPACE = 0x20
+VK_PRIOR = 0x21
+VK_NEXT = 0x22
+VK_END = 0x23
+VK_HOME = 0x24
+VK_LEFT = 0x25
+VK_UP = 0x26
+VK_RIGHT = 0x27
+VK_DOWN = 0x28
+VK_INSERT = 0x2D
+VK_DELETE = 0x2E
 VK_F1 = 0x70
 VK_F2 = 0x71
 VK_F3 = 0x72
 VK_F4 = 0x73
 VK_F5 = 0x74
 VK_F6 = 0x75
+VK_F7 = 0x76
+VK_F8 = 0x77
+VK_F9 = 0x78
+VK_F10 = 0x79
+VK_F11 = 0x7A
+VK_F12 = 0x7B
 
 INPUT_MOUSE = 0
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_MIDDLEDOWN = 0x0020
+MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
 KEYEVENTF_KEYUP = 0x0002
@@ -96,26 +121,73 @@ ACTION_NONE = "none"
 ACTION_HOLD = "hold"
 ACTION_PRESS_CYCLE = "press_cycle"
 
-TRIGGER_KEYS = {
-    "xbutton1": VK_XBUTTON1,
-    "xbutton2": VK_XBUTTON2,
+KEYBOARD_KEYS = {
+    **{str(index): 0x30 + index for index in range(10)},
+    **{chr(code).lower(): code for code in range(0x41, 0x5B)},
+    "space": VK_SPACE,
+    "tab": VK_TAB,
+    "enter": VK_RETURN,
+    "backspace": VK_BACK,
+    "capslock": VK_CAPITAL,
+    "shift": VK_SHIFT,
+    "ctrl": VK_CONTROL,
+    "alt": VK_MENU,
+    "insert": VK_INSERT,
+    "delete": VK_DELETE,
+    "home": VK_HOME,
+    "end": VK_END,
+    "pageup": VK_PRIOR,
+    "pagedown": VK_NEXT,
+    "up": VK_UP,
+    "down": VK_DOWN,
+    "left_arrow": VK_LEFT,
+    "right_arrow": VK_RIGHT,
     "f1": VK_F1,
     "f2": VK_F2,
     "f3": VK_F3,
     "f4": VK_F4,
     "f5": VK_F5,
     "f6": VK_F6,
+    "f7": VK_F7,
+    "f8": VK_F8,
+    "f9": VK_F9,
+    "f10": VK_F10,
+    "f11": VK_F11,
+    "f12": VK_F12,
 }
-TRIGGER_LABELS = {
+MOUSE_KEYS = {
+    "xbutton1": VK_XBUTTON1,
+    "xbutton2": VK_XBUTTON2,
+    "middle": 0x04,
+}
+TRIGGER_KEYS = {**MOUSE_KEYS, **KEYBOARD_KEYS}
+KEY_LABELS = {
     "xbutton1": "侧键 1",
     "xbutton2": "侧键 2",
-    "f1": "F1",
-    "f2": "F2",
-    "f3": "F3",
-    "f4": "F4",
-    "f5": "F5",
-    "f6": "F6",
+    "middle": "鼠标中键",
+    **{str(index): str(index) for index in range(10)},
+    **{chr(code).lower(): chr(code) for code in range(0x41, 0x5B)},
+    "space": "空格",
+    "tab": "Tab",
+    "enter": "Enter",
+    "backspace": "Backspace",
+    "capslock": "CapsLock",
+    "shift": "Shift",
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "insert": "Insert",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageup": "PageUp",
+    "pagedown": "PageDown",
+    "up": "方向键上",
+    "down": "方向键下",
+    "left_arrow": "方向键左",
+    "right_arrow": "方向键右",
+    **{f"f{index}": f"F{index}" for index in range(1, 13)},
 }
+TRIGGER_LABELS = {key: KEY_LABELS[key] for key in TRIGGER_KEYS}
 ACTION_LABELS = {
     ACTION_NONE: "无",
     ACTION_HOLD: "自动按住",
@@ -123,24 +195,58 @@ ACTION_LABELS = {
 }
 PRESS_KEYS = {
     "none": None,
-    "1": 0x31,
-    "2": 0x32,
-    "3": 0x33,
-    "4": 0x34,
-    "space": VK_SPACE,
     "left": "left",
     "right": "right",
+    "middle": "middle",
+    **KEYBOARD_KEYS,
 }
 PRESS_KEY_LABELS = {
     "none": "无",
-    "1": "1",
-    "2": "2",
-    "3": "3",
-    "4": "4",
-    "space": "空格",
     "left": "左键",
     "right": "右键",
+    "middle": "鼠标中键",
+    **{key: KEY_LABELS[key] for key in KEYBOARD_KEYS},
 }
+LABEL_TO_KEY_ID = {value.lower(): key for key, value in {**PRESS_KEY_LABELS, **TRIGGER_LABELS}.items()}
+KEY_ALIASES = {
+    "无": "none",
+    "none": "none",
+    "space": "space",
+    "空格键": "space",
+    "鼠标左键": "left",
+    "mouse left": "left",
+    "left button": "left",
+    "鼠标右键": "right",
+    "mouse right": "right",
+    "right button": "right",
+    "鼠标中键": "middle",
+    "middle button": "middle",
+    "mbutton": "middle",
+    "侧键1": "xbutton1",
+    "侧键 1": "xbutton1",
+    "xbutton1": "xbutton1",
+    "mouse4": "xbutton1",
+    "侧键2": "xbutton2",
+    "侧键 2": "xbutton2",
+    "xbutton2": "xbutton2",
+    "mouse5": "xbutton2",
+    "control": "ctrl",
+    "ctrl": "ctrl",
+    "escape": "esc",
+    "esc": "esc",
+    "pgup": "pageup",
+    "pgdn": "pagedown",
+    "left": "left_arrow",
+    "right": "right_arrow",
+}
+RECORDABLE_KEYS = {
+    "left": 0x01,
+    "right": 0x02,
+    "middle": 0x04,
+    **MOUSE_KEYS,
+    **KEYBOARD_KEYS,
+}
+RECORD_CANCEL_KEY = 0x1B
 INTERVAL_PRESETS = {
     "standard": ("标准 - 100ms", 100),
     "stable": ("稳定 - 150ms", 150),
@@ -251,6 +357,7 @@ class MacroEngine:
         self.thread: threading.Thread | None = None
         self.right_is_down = False
         self.left_is_down = False
+        self.middle_is_down = False
         self.held_keys: set[int] = set()
         self.active_macros: set[str] = set()
         self.last_trigger_down: dict[str, bool] = {}
@@ -275,6 +382,7 @@ class MacroEngine:
             self.active_macros.clear()
         self.release_right()
         self.release_left()
+        self.release_middle()
         self.release_all_keys()
 
     def update_config(self, config: Config) -> None:
@@ -288,6 +396,7 @@ class MacroEngine:
             self.sequence_index = {}
         self.release_right()
         self.release_left()
+        self.release_middle()
         self.release_all_keys()
 
     def snapshot(self) -> Snapshot:
@@ -391,11 +500,24 @@ class MacroEngine:
             send_mouse_input(MOUSEEVENTF_LEFTUP)
             self.left_is_down = False
 
+    def press_middle(self) -> None:
+        if self.middle_is_down:
+            return
+        send_mouse_input(MOUSEEVENTF_MIDDLEDOWN)
+        self.middle_is_down = True
+
+    def release_middle(self) -> None:
+        if self.middle_is_down:
+            send_mouse_input(MOUSEEVENTF_MIDDLEUP)
+            self.middle_is_down = False
+
     def press_hold_item(self, item: str) -> None:
         if item == "left":
             self.press_left()
         elif item == "right":
             self.press_right()
+        elif item == "middle":
+            self.press_middle()
         elif item in PRESS_KEYS and isinstance(PRESS_KEYS[item], int):
             virtual_key = PRESS_KEYS[item]
             if virtual_key not in self.held_keys:
@@ -407,6 +529,8 @@ class MacroEngine:
             self.release_left()
         elif item == "right":
             self.release_right()
+        elif item == "middle":
+            self.release_middle()
         elif item in PRESS_KEYS and isinstance(PRESS_KEYS[item], int):
             virtual_key = PRESS_KEYS[item]
             if virtual_key in self.held_keys:
@@ -557,6 +681,9 @@ class ConfigWindow:
         self.latest_release_url = GITHUB_RELEASES_URL
         self.macro_vars: list[dict[str, object]] = []
         self.donate_image: object | None = None
+        self.record_target_var: tk.StringVar | None = None
+        self.record_target_kind = ""
+        self.record_started_at = 0.0
 
         self._build()
         self.load_from_engine()
@@ -608,7 +735,7 @@ class ConfigWindow:
 
         macros = ttk.LabelFrame(main, text="宏配置")
         macros.pack(fill="x", pady=(0, 8))
-        self._help_label(macros, "每个宏都有自己的开关键和动作。循环连按会按槽位顺序循环，自动跳过“无”。间隔推荐从“标准 - 100ms”开始，越慢越稳定。").grid(row=0, column=0, columnspan=10, sticky="w", **pad)
+        self._help_label(macros, "开关键和槽位都可以下拉选择、直接输入，或点击对应输入框右侧的“录”按钮后按一次目标键。录入时按 Esc 取消。").grid(row=0, column=0, columnspan=10, sticky="w", **pad)
         headers = ["启用", "名称", "开关键", "动作", "槽位1", "槽位2", "槽位3", "槽位4", "间隔档位"]
         for col, header in enumerate(headers):
             ttk.Label(macros, text=header).grid(row=1, column=col, sticky="w", **pad)
@@ -670,11 +797,57 @@ class ConfigWindow:
         self.macro_vars.append(vars_for_row)
         ttk.Checkbutton(parent, variable=vars_for_row["enabled"]).grid(row=row, column=0, sticky="w", **pad)
         ttk.Entry(parent, textvariable=vars_for_row["name"], width=11).grid(row=row, column=1, sticky="w", **pad)
-        ttk.Combobox(parent, textvariable=vars_for_row["trigger"], values=trigger_values, state="readonly", width=8).grid(row=row, column=2, sticky="w", **pad)
+        self._key_picker(parent, row, 2, vars_for_row["trigger"], trigger_values, "trigger", 8)
         ttk.Combobox(parent, textvariable=vars_for_row["action"], values=action_values, state="readonly", width=10).grid(row=row, column=3, sticky="w", **pad)
         for offset, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
-            ttk.Combobox(parent, textvariable=vars_for_row[slot_name], values=press_values, state="readonly", width=6).grid(row=row, column=4 + offset, sticky="w", **pad)
+            self._key_picker(parent, row, 4 + offset, vars_for_row[slot_name], press_values, "press", 6)
         ttk.Combobox(parent, textvariable=vars_for_row["interval"], values=interval_values, state="readonly", width=13).grid(row=row, column=8, sticky="w", **pad)
+
+    def _key_picker(self, parent: tk.Widget, row: int, column: int, value_var: tk.StringVar, values: list[str], kind: str, width: int) -> None:
+        pad = {"padx": 5, "pady": 4}
+        frame = ttk.Frame(parent)
+        frame.grid(row=row, column=column, sticky="w", **pad)
+        ttk.Combobox(frame, textvariable=value_var, values=values, width=width).pack(side="left")
+        ttk.Button(frame, text="录", width=3, command=lambda: self.record_key(value_var, kind)).pack(side="left", padx=(3, 0))
+
+    def record_key(self, value_var: tk.StringVar, kind: str) -> None:
+        self.record_target_var = value_var
+        self.record_target_kind = kind
+        self.record_started_at = time.monotonic() + 0.2
+        self.status_var.set("请按一个键，Esc 取消")
+        self.root.after(30, self._poll_record_key)
+
+    def _poll_record_key(self) -> None:
+        if self.record_target_var is None:
+            return
+        if time.monotonic() < self.record_started_at:
+            self.root.after(30, self._poll_record_key)
+            return
+        if is_key_down(RECORD_CANCEL_KEY):
+            self._finish_recording(None)
+            return
+        for key_id, virtual_key in RECORDABLE_KEYS.items():
+            if self.record_target_kind == "trigger" and key_id == "left":
+                continue
+            if is_key_down(virtual_key):
+                self._finish_recording(key_id)
+                return
+        self.root.after(30, self._poll_record_key)
+
+    def _finish_recording(self, key_id: str | None) -> None:
+        target = self.record_target_var
+        self.record_target_var = None
+        self.record_target_kind = ""
+        if target is None:
+            return
+        if key_id is None:
+            self.status_var.set("已取消录入")
+            return
+        if key_id in PRESS_KEY_LABELS:
+            target.set(PRESS_KEY_LABELS[key_id])
+        elif key_id in TRIGGER_LABELS:
+            target.set(TRIGGER_LABELS[key_id])
+        self.status_var.set(f"已录入：{target.get()}")
 
     def _donate_label(self, parent: tk.Widget) -> ttk.Label | None:
         if Image is None or ImageTk is None or not DONATE_IMAGE_PATH.exists():
@@ -735,10 +908,18 @@ class ConfigWindow:
         try:
             macros: list[MacroConfig] = []
             for vars_for_row in self.macro_vars:
+                macro_name = str(vars_for_row["name"].get()).strip() or "未命名宏"
+                trigger_text = str(vars_for_row["trigger"].get()).strip()
+                if not is_valid_key_text(trigger_text, TRIGGER_KEYS) or trigger_label_to_id(trigger_text) == "left":
+                    raise ValueError(f"{macro_name} 的开关键无效：{trigger_text}")
+                for slot_name in ["slot1", "slot2", "slot3", "slot4"]:
+                    slot_text = str(vars_for_row[slot_name].get()).strip()
+                    if not is_valid_key_text(slot_text, PRESS_KEYS):
+                        raise ValueError(f"{macro_name} 的{slot_name.replace('slot', '槽位')}无效：{slot_text}")
                 macros.append(MacroConfig(
                     enabled=bool(vars_for_row["enabled"].get()),
-                    name=str(vars_for_row["name"].get()).strip(),
-                    trigger=trigger_label_to_id(str(vars_for_row["trigger"].get())),
+                    name=macro_name,
+                    trigger=trigger_label_to_id(trigger_text),
                     action=action_label_to_id(str(vars_for_row["action"].get())),
                     sequence=[press_key_label_to_id(str(vars_for_row[name].get())) for name in ["slot1", "slot2", "slot3", "slot4"]],
                     interval_ms=interval_label_to_ms(str(vars_for_row["interval"].get())),
@@ -793,26 +974,47 @@ def action_id_to_label(action_id: str) -> str:
     return ACTION_LABELS.get(action_id, ACTION_LABELS[ACTION_NONE])
 
 
+def key_text_to_id(text: str, allowed: dict[str, object], fallback: str) -> str:
+    raw = text.strip()
+    if not raw:
+        return fallback
+    if raw in allowed:
+        return raw
+    lowered = raw.lower().replace("_", "").replace("-", "").replace(" ", "")
+    if lowered in allowed:
+        return lowered
+    if lowered in KEY_ALIASES and KEY_ALIASES[lowered] in allowed:
+        return KEY_ALIASES[lowered]
+    label_key = raw.lower()
+    if label_key in LABEL_TO_KEY_ID and LABEL_TO_KEY_ID[label_key] in allowed:
+        return LABEL_TO_KEY_ID[label_key]
+    if len(raw) == 1 and raw.isalpha() and raw.lower() in allowed:
+        return raw.lower()
+    if len(raw) == 1 and raw.isdigit() and raw in allowed:
+        return raw
+    return fallback
+
+
+def is_valid_key_text(text: str, allowed: dict[str, object]) -> bool:
+    return key_text_to_id(text, allowed, "") != ""
+
+
 def trigger_label_to_id(label: str) -> str:
-    for key, value in TRIGGER_LABELS.items():
-        if value == label:
-            return key
-    return "xbutton1"
+    return key_text_to_id(label, TRIGGER_KEYS, "xbutton1")
 
 
 def trigger_id_to_label(trigger_id: str) -> str:
-    return TRIGGER_LABELS.get(trigger_id, TRIGGER_LABELS["xbutton1"])
+    normalized = trigger_label_to_id(trigger_id)
+    return TRIGGER_LABELS.get(normalized, TRIGGER_LABELS["xbutton1"])
 
 
 def press_key_label_to_id(label: str) -> str:
-    for key, value in PRESS_KEY_LABELS.items():
-        if value == label:
-            return key
-    return "none"
+    return key_text_to_id(label, PRESS_KEYS, "none")
 
 
 def press_key_id_to_label(key_id: str) -> str:
-    return PRESS_KEY_LABELS.get(key_id, PRESS_KEY_LABELS["none"])
+    normalized = press_key_label_to_id(key_id)
+    return PRESS_KEY_LABELS.get(normalized, PRESS_KEY_LABELS["none"])
 
 
 def interval_label_to_ms(label: str) -> int:
@@ -938,7 +1140,7 @@ def parse_macros(raw: dict[str, object]) -> list[MacroConfig]:
 
 def normalize_sequence(sequence: list[str] | None) -> list[str]:
     values = list(sequence or [])
-    normalized = [(value if value in PRESS_KEYS else "none") for value in values[:4]]
+    normalized = [press_key_label_to_id(str(value)) for value in values[:4]]
     while len(normalized) < 4:
         normalized.append("none")
     return normalized
@@ -958,7 +1160,7 @@ def normalize_macros(macros: list[MacroConfig] | None) -> list[MacroConfig]:
         normalized.append(MacroConfig(
             enabled=bool(macro.enabled),
             name=(macro.name or f"宏 {index + 1}").strip(),
-            trigger=macro.trigger if macro.trigger in TRIGGER_KEYS else defaults[index].trigger,
+            trigger=trigger_label_to_id(macro.trigger) if trigger_label_to_id(macro.trigger) in TRIGGER_KEYS else defaults[index].trigger,
             action=macro.action if macro.action in ACTION_LABELS else ACTION_NONE,
             sequence=normalize_sequence(macro.sequence),
             interval_ms=max(int(macro.interval_ms), 100),
@@ -1001,6 +1203,8 @@ def press_sequence_item(item: str) -> None:
         click_left()
     elif item == "right":
         click_right()
+    elif item == "middle":
+        click_middle()
     elif item in PRESS_KEYS and isinstance(PRESS_KEYS[item], int):
         tap_key(PRESS_KEYS[item])
 
@@ -1022,6 +1226,11 @@ def click_left() -> None:
 def click_right() -> None:
     send_mouse_input(MOUSEEVENTF_RIGHTDOWN)
     send_mouse_input(MOUSEEVENTF_RIGHTUP)
+
+
+def click_middle() -> None:
+    send_mouse_input(MOUSEEVENTF_MIDDLEDOWN)
+    send_mouse_input(MOUSEEVENTF_MIDDLEUP)
 
 
 def send_key_input(virtual_key: int, flags: int) -> None:
