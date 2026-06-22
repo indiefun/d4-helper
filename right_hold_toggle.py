@@ -207,6 +207,38 @@ PRESS_KEY_LABELS = {
     "middle": "鼠标中键",
     **{key: KEY_LABELS[key] for key in KEYBOARD_KEYS},
 }
+COMMON_TRIGGER_KEYS = [
+    "xbutton1",
+    "xbutton2",
+    "middle",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9",
+    "f10",
+    "f11",
+    "f12",
+]
+COMMON_PRESS_KEYS = [
+    "none",
+    "left",
+    "right",
+    "middle",
+    "1",
+    "2",
+    "3",
+    "4",
+    "space",
+    "tab",
+    "shift",
+    "ctrl",
+    "alt",
+]
 LABEL_TO_KEY_ID = {value.lower(): key for key, value in {**PRESS_KEY_LABELS, **TRIGGER_LABELS}.items()}
 KEY_ALIASES = {
     "无": "none",
@@ -735,17 +767,15 @@ class ConfigWindow:
 
         macros = ttk.LabelFrame(main, text="宏配置")
         macros.pack(fill="x", pady=(0, 8))
-        self._help_label(macros, "开关键和槽位都可以下拉选择、直接输入，或点击对应输入框右侧的“录”按钮后按一次目标键。录入时按 Esc 取消。").grid(row=0, column=0, columnspan=10, sticky="w", **pad)
+        self._help_label(macros, "每个按键格右侧都有“录”和“选”。推荐点“录”后按一次目标键；常用键可以点“选”。录入时按 Esc 取消。").grid(row=0, column=0, columnspan=10, sticky="w", **pad)
         headers = ["启用", "名称", "开关键", "动作", "槽位1", "槽位2", "槽位3", "槽位4", "间隔档位"]
         for col, header in enumerate(headers):
             ttk.Label(macros, text=header).grid(row=1, column=col, sticky="w", **pad)
 
-        trigger_values = list(TRIGGER_LABELS.values())
         action_values = list(ACTION_LABELS.values())
-        press_values = list(PRESS_KEY_LABELS.values())
         interval_values = [label for label, _ms in INTERVAL_PRESETS.values()]
         for index in range(4):
-            self._macro_row(macros, index + 2, index, trigger_values, action_values, press_values, interval_values)
+            self._macro_row(macros, index + 2, index, action_values, interval_values)
 
         overlay = ttk.LabelFrame(main, text="浮层")
         overlay.pack(fill="x", pady=(0, 8))
@@ -781,7 +811,7 @@ class ConfigWindow:
         if donate_label is not None:
             donate_label.grid(row=0, column=1, sticky="e", padx=8, pady=8)
 
-    def _macro_row(self, parent: tk.Widget, row: int, index: int, trigger_values: list[str], action_values: list[str], press_values: list[str], interval_values: list[str]) -> None:
+    def _macro_row(self, parent: tk.Widget, row: int, index: int, action_values: list[str], interval_values: list[str]) -> None:
         pad = {"padx": 5, "pady": 4}
         vars_for_row = {
             "enabled": tk.BooleanVar(),
@@ -797,18 +827,32 @@ class ConfigWindow:
         self.macro_vars.append(vars_for_row)
         ttk.Checkbutton(parent, variable=vars_for_row["enabled"]).grid(row=row, column=0, sticky="w", **pad)
         ttk.Entry(parent, textvariable=vars_for_row["name"], width=11).grid(row=row, column=1, sticky="w", **pad)
-        self._key_picker(parent, row, 2, vars_for_row["trigger"], trigger_values, "trigger", 8)
+        self._key_picker(parent, row, 2, vars_for_row["trigger"], "trigger", 8)
         ttk.Combobox(parent, textvariable=vars_for_row["action"], values=action_values, state="readonly", width=10).grid(row=row, column=3, sticky="w", **pad)
         for offset, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
-            self._key_picker(parent, row, 4 + offset, vars_for_row[slot_name], press_values, "press", 6)
+            self._key_picker(parent, row, 4 + offset, vars_for_row[slot_name], "press", 6)
         ttk.Combobox(parent, textvariable=vars_for_row["interval"], values=interval_values, state="readonly", width=13).grid(row=row, column=8, sticky="w", **pad)
 
-    def _key_picker(self, parent: tk.Widget, row: int, column: int, value_var: tk.StringVar, values: list[str], kind: str, width: int) -> None:
+    def _key_picker(self, parent: tk.Widget, row: int, column: int, value_var: tk.StringVar, kind: str, width: int) -> None:
         pad = {"padx": 5, "pady": 4}
         frame = ttk.Frame(parent)
         frame.grid(row=row, column=column, sticky="w", **pad)
-        ttk.Combobox(frame, textvariable=value_var, values=values, width=width).pack(side="left")
+        ttk.Entry(frame, textvariable=value_var, width=width, state="readonly").pack(side="left")
         ttk.Button(frame, text="录", width=3, command=lambda: self.record_key(value_var, kind)).pack(side="left", padx=(3, 0))
+        ttk.Button(frame, text="选", width=3, command=lambda: self.show_key_menu(frame, value_var, kind)).pack(side="left", padx=(3, 0))
+
+    def show_key_menu(self, anchor: tk.Widget, value_var: tk.StringVar, kind: str) -> None:
+        menu = tk.Menu(anchor, tearoff=False)
+        key_ids = COMMON_TRIGGER_KEYS if kind == "trigger" else COMMON_PRESS_KEYS
+        labels = TRIGGER_LABELS if kind == "trigger" else PRESS_KEY_LABELS
+        for key_id in key_ids:
+            menu.add_command(label=labels[key_id], command=lambda selected=key_id: self._select_key(value_var, selected, kind))
+        menu.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
+
+    def _select_key(self, value_var: tk.StringVar, key_id: str, kind: str) -> None:
+        labels = TRIGGER_LABELS if kind == "trigger" else PRESS_KEY_LABELS
+        value_var.set(labels[key_id])
+        self.status_var.set(f"已选择：{value_var.get()}")
 
     def record_key(self, value_var: tk.StringVar, kind: str) -> None:
         self.record_target_var = value_var
