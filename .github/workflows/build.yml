@@ -50,17 +50,17 @@ jobs:
       - name: Package release zip
         shell: pwsh
         run: |
-          Compress-Archive -Path .\dist\D4Helper.exe, .\dist\config.json, .\dist\VERSION -DestinationPath ".\dist\D4Helper-v${{ steps.version.outputs.version }}-windows.zip" -Force
+          Compress-Archive -Path .\dist\D4Helper.exe, .\dist\config.json, .\dist\VERSION -DestinationPath ".\dist\D4Helper-windows-latest.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: D4Helper-v${{ steps.version.outputs.version }}-windows
+          name: D4Helper-windows-latest
           path: |
             dist/D4Helper.exe
             dist/config.json
             dist/VERSION
-            dist/D4Helper-v${{ steps.version.outputs.version }}-windows.zip
+            dist/D4Helper-windows-latest.zip
 
       - name: Create GitHub release
         if: github.ref_type == 'tag'
@@ -69,4 +69,4 @@ jobs:
           name: D4Helper ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            dist/D4Helper-v${{ steps.version.outputs.version }}-windows.zip
+            dist/D4Helper-windows-latest.zip

@@ -213,14 +213,22 @@ dist\VERSION
 每次构建会上传 artifact：
 
 ```text
-D4Helper-v版本号-windows
+D4Helper-windows-latest
 ```
 
 推送 tag 时会自动创建 GitHub Release，并上传：
 
 ```text
-D4Helper-v版本号-windows.zip
+D4Helper-windows-latest.zip
 ```
+
+静态展示页使用固定文件名下载最新版本：
+
+```text
+https://github.com/indiefun/d4-helper/releases/latest/download/D4Helper-windows-latest.zip
+```
+
+国内加速下载使用第三方 GitHub 代理前缀；如果代理不可用，请使用 GitHub Release。
 
 ## 版本升级与发布
 
