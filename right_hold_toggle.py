@@ -30,6 +30,8 @@ except Exception:
 APP_NAME = "D4Helper"
 GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/indiefun/d4-helper/releases/latest"
 GITHUB_RELEASES_URL = "https://github.com/indiefun/d4-helper/releases/latest"
+APP_MUTEX_NAME = "Global\\D4HelperSingleInstance"
+APP_MUTEX_HANDLE: wintypes.HANDLE | None = None
 
 
 def app_dir() -> Path:
@@ -63,6 +65,14 @@ def read_app_version() -> str:
 
 APP_VERSION = read_app_version()
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}" if APP_VERSION != "unknown" else APP_NAME
+
+
+def acquire_single_instance() -> bool:
+    global APP_MUTEX_HANDLE
+    APP_MUTEX_HANDLE = kernel32.CreateMutexW(None, True, APP_MUTEX_NAME)
+    if not APP_MUTEX_HANDLE:
+        return True
+    return ctypes.get_last_error() != ERROR_ALREADY_EXISTS
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -116,6 +126,7 @@ KEYEVENTF_KEYUP = 0x0002
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 MAX_PATH = 260
+ERROR_ALREADY_EXISTS = 183
 
 ACTION_NONE = "none"
 ACTION_HOLD = "hold"
@@ -339,6 +350,8 @@ user32.SetWindowLongW.restype = wintypes.LONG
 
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.CreateMutexW.restype = wintypes.HANDLE
 kernel32.QueryFullProcessImageNameW.argtypes = [
     wintypes.HANDLE,
     wintypes.DWORD,
@@ -412,10 +425,7 @@ class MacroEngine:
             self.thread.join(timeout=1.5)
         with self.lock:
             self.active_macros.clear()
-        self.release_right()
-        self.release_left()
-        self.release_middle()
-        self.release_all_keys()
+        self.release_all_inputs()
 
     def update_config(self, config: Config) -> None:
         config = normalize_config(config)
@@ -426,10 +436,7 @@ class MacroEngine:
             self.last_trigger_down = {}
             self.next_press_at = {}
             self.sequence_index = {}
-        self.release_right()
-        self.release_left()
-        self.release_middle()
-        self.release_all_keys()
+        self.release_all_inputs()
 
     def snapshot(self) -> Snapshot:
         with self.lock:
@@ -477,9 +484,7 @@ class MacroEngine:
                 ]
 
             if not target_active:
-                self.release_right()
-                self.release_left()
-                self.release_all_keys()
+                self.release_all_inputs()
 
             now = time.monotonic()
             for macro in active_cycle_macros:
@@ -493,8 +498,7 @@ class MacroEngine:
 
             time.sleep(max(config.poll_interval_ms, 50) / 1000)
 
-        self.release_right()
-        self.release_left()
+        self.release_all_inputs()
 
     def _toggle_macro(self, macro: MacroConfig) -> None:
         if macro.name in self.active_macros:
@@ -573,6 +577,12 @@ class MacroEngine:
         for virtual_key in list(self.held_keys):
             send_key_input(virtual_key, KEYEVENTF_KEYUP)
             self.held_keys.remove(virtual_key)
+
+    def release_all_inputs(self) -> None:
+        self.release_right()
+        self.release_left()
+        self.release_middle()
+        self.release_all_keys()
 
 class OverlayWindow:
     def __init__(self, root: tk.Tk, engine: MacroEngine) -> None:
@@ -1483,6 +1493,13 @@ def run_gui(config: Config, config_path: Path) -> int:
 
 
 def main() -> int:
+    if not acquire_single_instance():
+        try:
+            messagebox.showinfo(APP_NAME, "D4Helper 已经在运行。")
+        except Exception:
+            print("D4Helper 已经在运行。")
+        return 0
+
     parser = argparse.ArgumentParser(description=APP_NAME)
     parser.add_argument("--detect", action="store_true", help="打印当前前台窗口标题和进程名")
     parser.add_argument("--config", default=str(CONFIG_PATH), help="配置文件路径")
