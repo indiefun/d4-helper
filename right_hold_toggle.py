@@ -1438,7 +1438,7 @@ def create_tray_icon(command_queue: queue.Queue[str]) -> object | None:
         image,
         APP_NAME,
         pystray.Menu(
-            pystray.MenuItem("打开配置", show_config),
+            pystray.MenuItem("打开配置", show_config, default=True),
             pystray.MenuItem("退出", quit_app),
         ),
     )
