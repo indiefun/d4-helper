@@ -813,10 +813,10 @@ class ConfigWindow:
         ttk.Button(update, text="检查更新", command=self.check_update).grid(row=0, column=1, sticky="e", **pad)
         ttk.Button(update, text="查看更新", command=self.open_release_page).grid(row=0, column=2, sticky="e", **pad)
 
-        support = ttk.LabelFrame(main, text="支持项目")
+        support = ttk.LabelFrame(main, text="支持与反馈")
         support.pack(fill="x")
         support.columnconfigure(0, weight=1)
-        self._help_label(support, "如果这个工具对你有帮助，可以扫码打赏支持。二维码只用于自愿支持，不影响任何功能。").grid(row=0, column=0, sticky="nw", **pad)
+        self._help_label(support, "如果这个工具对你有帮助，可以扫码打赏支持。遇到问题或有建议，欢迎加入 QQ 交流群：958154728。").grid(row=0, column=0, sticky="nw", **pad)
         donate_label = self._donate_label(support)
         if donate_label is not None:
             donate_label.grid(row=0, column=1, sticky="e", padx=8, pady=8)
