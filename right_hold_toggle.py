@@ -290,12 +290,8 @@ RECORDABLE_KEYS = {
     **KEYBOARD_KEYS,
 }
 RECORD_CANCEL_KEY = 0x1B
-INTERVAL_PRESETS = {
-    "standard": ("标准 - 100ms", 100),
-    "stable": ("稳定 - 150ms", 150),
-    "slow": ("慢速 - 250ms", 250),
-    "very_slow": ("很慢 - 500ms", 500),
-}
+DEFAULT_INTERVAL_MS = 100
+MIN_MACRO_INTERVAL_MS = 25
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -370,7 +366,7 @@ class MacroConfig:
     trigger: str
     action: str
     sequence: list[str]
-    interval_ms: int = 100
+    interval_ms: int = DEFAULT_INTERVAL_MS
 
 
 @dataclass
@@ -494,7 +490,7 @@ class MacroEngine:
                         index = self.sequence_index.get(macro.name, 0) % len(sequence)
                         press_sequence_item(sequence[index])
                         self.sequence_index[macro.name] = index + 1
-                        self.next_press_at[macro.name] = now + (max(macro.interval_ms, 100) / 1000)
+                        self.next_press_at[macro.name] = now + (max(macro.interval_ms, MIN_MACRO_INTERVAL_MS) / 1000)
 
             time.sleep(max(config.poll_interval_ms, 50) / 1000)
 
@@ -778,14 +774,13 @@ class ConfigWindow:
         macros = ttk.LabelFrame(main, text="宏配置")
         macros.pack(fill="x", pady=(0, 8))
         self._help_label(macros, "每个按键格右侧都有“录”和“选”。推荐点“录”后按一次目标键；常用键可以点“选”。录入时按 Esc 取消。").grid(row=0, column=0, columnspan=10, sticky="w", **pad)
-        headers = ["启用", "名称", "开关键", "动作", "槽位1", "槽位2", "槽位3", "槽位4", "间隔档位"]
+        headers = ["启用", "名称", "开关键", "动作", "槽位1", "槽位2", "槽位3", "槽位4", "间隔(ms)"]
         for col, header in enumerate(headers):
             ttk.Label(macros, text=header).grid(row=1, column=col, sticky="w", **pad)
 
         action_values = list(ACTION_LABELS.values())
-        interval_values = [label for label, _ms in INTERVAL_PRESETS.values()]
         for index in range(4):
-            self._macro_row(macros, index + 2, index, action_values, interval_values)
+            self._macro_row(macros, index + 2, index, action_values)
 
         overlay = ttk.LabelFrame(main, text="浮层")
         overlay.pack(fill="x", pady=(0, 8))
@@ -821,7 +816,7 @@ class ConfigWindow:
         if donate_label is not None:
             donate_label.grid(row=0, column=1, sticky="e", padx=8, pady=8)
 
-    def _macro_row(self, parent: tk.Widget, row: int, index: int, action_values: list[str], interval_values: list[str]) -> None:
+    def _macro_row(self, parent: tk.Widget, row: int, index: int, action_values: list[str]) -> None:
         pad = {"padx": 5, "pady": 4}
         vars_for_row = {
             "enabled": tk.BooleanVar(),
@@ -832,7 +827,7 @@ class ConfigWindow:
             "slot2": tk.StringVar(),
             "slot3": tk.StringVar(),
             "slot4": tk.StringVar(),
-            "interval": tk.StringVar(),
+            "interval": tk.StringVar(value=str(DEFAULT_INTERVAL_MS)),
         }
         self.macro_vars.append(vars_for_row)
         ttk.Checkbutton(parent, variable=vars_for_row["enabled"]).grid(row=row, column=0, sticky="w", **pad)
@@ -841,7 +836,7 @@ class ConfigWindow:
         ttk.Combobox(parent, textvariable=vars_for_row["action"], values=action_values, state="readonly", width=10).grid(row=row, column=3, sticky="w", **pad)
         for offset, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
             self._key_picker(parent, row, 4 + offset, vars_for_row[slot_name], "press", 6)
-        ttk.Combobox(parent, textvariable=vars_for_row["interval"], values=interval_values, state="readonly", width=13).grid(row=row, column=8, sticky="w", **pad)
+        ttk.Spinbox(parent, from_=MIN_MACRO_INTERVAL_MS, to=5000, increment=5, textvariable=vars_for_row["interval"], width=8).grid(row=row, column=8, sticky="w", **pad)
 
     def _key_picker(self, parent: tk.Widget, row: int, column: int, value_var: tk.StringVar, kind: str, width: int) -> None:
         pad = {"padx": 5, "pady": 4}
@@ -947,7 +942,7 @@ class ConfigWindow:
             sequence = normalize_sequence(macro.sequence)
             for slot_index, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
                 vars_for_row[slot_name].set(press_key_id_to_label(sequence[slot_index]))
-            vars_for_row["interval"].set(interval_ms_to_label(macro.interval_ms))
+            vars_for_row["interval"].set(macro.interval_ms)
         self.poll_interval_var.set(config.poll_interval_ms)
         self.overlay_enabled_var.set(config.overlay_enabled)
         self.overlay_x_var.set(config.overlay_x)
@@ -976,7 +971,7 @@ class ConfigWindow:
                     trigger=trigger_label_to_id(trigger_text),
                     action=action_label_to_id(str(vars_for_row["action"].get())),
                     sequence=[press_key_label_to_id(str(vars_for_row[name].get())) for name in ["slot1", "slot2", "slot3", "slot4"]],
-                    interval_ms=interval_label_to_ms(str(vars_for_row["interval"].get())),
+                    interval_ms=parse_interval_ms(vars_for_row["interval"].get(), macro_name),
                 ))
             config = Config(
                 window_title_contains=self.title_var.get().strip(),
@@ -1071,18 +1066,14 @@ def press_key_id_to_label(key_id: str) -> str:
     return PRESS_KEY_LABELS.get(normalized, PRESS_KEY_LABELS["none"])
 
 
-def interval_label_to_ms(label: str) -> int:
-    for _key, (preset_label, ms) in INTERVAL_PRESETS.items():
-        if preset_label == label:
-            return ms
-    return 100
-
-
-def interval_ms_to_label(interval_ms: int) -> str:
-    for _key, (label, ms) in INTERVAL_PRESETS.items():
-        if ms == interval_ms:
-            return label
-    return INTERVAL_PRESETS["standard"][0]
+def parse_interval_ms(value: object, macro_name: str) -> int:
+    try:
+        interval_ms = int(value)
+    except (TypeError, ValueError, tk.TclError) as exc:
+        raise ValueError(f"{macro_name} 的间隔必须是数字。") from exc
+    if interval_ms < MIN_MACRO_INTERVAL_MS:
+        raise ValueError(f"{macro_name} 的间隔不能小于 {MIN_MACRO_INTERVAL_MS}ms。")
+    return interval_ms
 
 
 def parse_version(version: str) -> tuple[int, ...]:
@@ -1159,7 +1150,7 @@ def parse_macros(raw: dict[str, object]) -> list[MacroConfig]:
                 trigger=str(item.get("trigger", "xbutton1")),
                 action=action,
                 sequence=sequence,
-                interval_ms=int(item.get("interval_ms", 100)),
+                interval_ms=int(item.get("interval_ms", DEFAULT_INTERVAL_MS)),
             ))
         return normalize_macros(parsed)
 
@@ -1168,10 +1159,10 @@ def parse_macros(raw: dict[str, object]) -> list[MacroConfig]:
     macros[0].trigger = str(raw.get("right_hold_trigger", "xbutton1"))
     macros[1].enabled = bool(raw.get("left_click_loop_enabled", True))
     macros[1].trigger = str(raw.get("left_click_loop_trigger", "xbutton2"))
-    macros[1].interval_ms = int(raw.get("left_click_interval_ms", 100))
+    macros[1].interval_ms = int(raw.get("left_click_interval_ms", DEFAULT_INTERVAL_MS))
     macros[2].enabled = bool(raw.get("f1_combo_enabled", True))
     macros[2].trigger = str(raw.get("f1_combo_trigger", "f1"))
-    macros[2].interval_ms = max(int(raw.get("f1_combo_interval_ms", 100)), 100)
+    macros[2].interval_ms = int(raw.get("f1_combo_interval_ms", DEFAULT_INTERVAL_MS))
 
     old_xbutton1_action = str(raw.get("xbutton1_action", ""))
     old_xbutton2_action = str(raw.get("xbutton2_action", ""))
@@ -1188,7 +1179,7 @@ def parse_macros(raw: dict[str, object]) -> list[MacroConfig]:
             macros[3].trigger = trigger_id
             macros[3].action = ACTION_PRESS_CYCLE
             macros[3].sequence = ["right", "none", "none", "none"]
-            macros[3].interval_ms = int(raw.get("right_click_interval_ms", 100))
+            macros[3].interval_ms = int(raw.get("right_click_interval_ms", DEFAULT_INTERVAL_MS))
     return normalize_macros(macros)
 
 
@@ -1217,7 +1208,7 @@ def normalize_macros(macros: list[MacroConfig] | None) -> list[MacroConfig]:
             trigger=trigger_label_to_id(macro.trigger) if trigger_label_to_id(macro.trigger) in TRIGGER_KEYS else defaults[index].trigger,
             action=macro.action if macro.action in ACTION_LABELS else ACTION_NONE,
             sequence=normalize_sequence(macro.sequence),
-            interval_ms=max(int(macro.interval_ms), 100),
+            interval_ms=max(int(macro.interval_ms), MIN_MACRO_INTERVAL_MS),
         ))
     return normalized
 
