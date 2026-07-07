@@ -85,6 +85,12 @@ GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_LAYERED = 0x00080000
 WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_NOACTIVATE = 0x08000000
+HWND_TOPMOST = wintypes.HWND(-1)
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
 
 VK_XBUTTON1 = 0x05
 VK_XBUTTON2 = 0x06
@@ -359,6 +365,16 @@ user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetWindowLongW.restype = wintypes.LONG
 user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
 user32.SetWindowLongW.restype = wintypes.LONG
+user32.SetWindowPos.argtypes = [
+    wintypes.HWND,
+    wintypes.HWND,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.UINT,
+]
+user32.SetWindowPos.restype = wintypes.BOOL
 
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
@@ -388,6 +404,7 @@ class MacroConfig:
 
 @dataclass
 class ToggleProfile:
+    enabled: bool
     trigger: str
     macro_ids: list[str]
     id: str = ""
@@ -479,15 +496,22 @@ class MacroEngine:
             process = get_process_name(hwnd) if hwnd else ""
             target_active = foreground_matches_values(config, title, process)
 
+            release_on_focus_loss = False
             with self.lock:
+                was_target_active = self.target_active
                 self.target_active = target_active
                 self.foreground_title = title
                 self.foreground_process = process
 
-                if not target_active:
+                if not target_active and (was_target_active or self.active_macros):
                     self.active_macros.clear()
+                    self.next_press_at.clear()
+                    self.sequence_index.clear()
+                    release_on_focus_loss = True
 
                 for profile in config.toggle_profiles or []:
+                    if not profile.enabled:
+                        continue
                     virtual_key = TRIGGER_KEYS.get(profile.trigger)
                     down = is_key_down(virtual_key) if target_active and virtual_key is not None else False
                     trigger_key = f"profile:{profile.id}"
@@ -512,7 +536,7 @@ class MacroEngine:
                     if target_active and macro.enabled and macro.action == ACTION_PRESS_CYCLE and macro.id in self.active_macros
                 ]
 
-            if not target_active:
+            if release_on_focus_loss:
                 self.release_all_inputs()
 
             now = time.monotonic()
@@ -648,6 +672,8 @@ class OverlayWindow:
         self.window.attributes("-topmost", True)
         self.window.configure(bg="#111111")
         self.window.attributes("-alpha", 0.62)
+        self._last_geometry = ""
+        self._overlay_style_applied = False
 
         self.canvas = tk.Canvas(
             self.window,
@@ -683,10 +709,38 @@ class OverlayWindow:
         else:
             x = snapshot.config.overlay_x
             y = snapshot.config.overlay_y
-        self.window.geometry(f"{self.width}x{self.height}+{x}+{y}")
-        self.window.deiconify()
-        self.window.lift()
-        self.window.attributes("-topmost", True)
+        geometry = f"{self.width}x{self.height}+{x}+{y}"
+        if geometry != self._last_geometry:
+            self.window.geometry(geometry)
+            self._last_geometry = geometry
+        if self.window.state() == "withdrawn":
+            self.window.deiconify()
+            self._apply_window_style()
+            self.window.attributes("-topmost", True)
+            self.canvas.update_idletasks()
+
+    def _apply_window_style(self) -> None:
+        if self._overlay_style_applied:
+            return
+        try:
+            self.window.update_idletasks()
+            hwnd = self.window.winfo_id()
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            style |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+            style &= ~WS_EX_TRANSPARENT
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+            user32.SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+            self._overlay_style_applied = True
+        except tk.TclError:
+            pass
 
     def _visible_macros(self, snapshot: Snapshot) -> tuple[list[MacroConfig], int]:
         enabled_macros = [macro for macro in (snapshot.config.macros or []) if macro.enabled and macro.action != ACTION_NONE]
@@ -888,12 +942,8 @@ class ConfigWindow:
 
         all_toggle = ttk.LabelFrame(main, text="一键启动")
         all_toggle.pack(fill="x", pady=(0, 8))
-        self._help_label(
-            all_toggle,
-            "可以添加多个一键启动配置。每个配置单独设置快捷键，并勾选它要控制的宏；按一次全部打开，再按一次全部关闭。",
-        ).pack(anchor="w", padx=5, pady=(4, 6))
         self.toggle_profiles_container = ttk.Frame(all_toggle)
-        self.toggle_profiles_container.pack(fill="x", padx=5, pady=(0, 6))
+        self.toggle_profiles_container.pack(fill="x", padx=5, pady=(6, 6))
         self._render_toggle_profile_rows()
 
         support = ttk.LabelFrame(main, text="支持与反馈")
@@ -977,6 +1027,7 @@ class ConfigWindow:
     def _new_toggle_profile_vars(self, profile: ToggleProfile) -> dict[str, object]:
         return {
             "id": profile.id,
+            "enabled": tk.BooleanVar(value=profile.enabled),
             "trigger": tk.StringVar(value=optional_trigger_id_to_label(profile.trigger)),
             "selected_macro_ids": set(profile.macro_ids or []),
             "selected_vars": {},
@@ -1006,23 +1057,24 @@ class ConfigWindow:
         for child in self.toggle_profiles_container.winfo_children():
             child.destroy()
 
+        pad = {"padx": 5, "pady": 4}
+        headers = ["启用", "快捷键", "控制宏", "操作"]
+        for col, header in enumerate(headers):
+            ttk.Label(self.toggle_profiles_container, text=header).grid(row=0, column=col, sticky="w", **pad)
+
         if not self.toggle_profile_vars:
             ttk.Label(
                 self.toggle_profiles_container,
                 text="当前还没有一键启动配置，点击“添加一键启动”创建。",
                 foreground="#666666",
-            ).pack(anchor="w", pady=(0, 6))
+            ).grid(row=1, column=1, columnspan=3, sticky="w", **pad)
 
         for index, profile_vars in enumerate(self.toggle_profile_vars):
-            frame = ttk.LabelFrame(self.toggle_profiles_container, text=f"配置 {index + 1}")
-            frame.pack(fill="x", pady=(0, 6))
-            pad = {"padx": 5, "pady": 4}
-            ttk.Label(frame, text="快捷键").grid(row=0, column=0, sticky="w", **pad)
-            self._key_picker(frame, 0, 1, profile_vars["trigger"], "optional_trigger", 8)
-            ttk.Button(frame, text="删除", width=6, command=lambda row_index=index: self.remove_toggle_profile_row(row_index)).grid(row=0, column=2, sticky="e", **pad)
-            ttk.Label(frame, text="包含宏").grid(row=1, column=0, sticky="nw", **pad)
-            checks = ttk.Frame(frame)
-            checks.grid(row=1, column=1, columnspan=2, sticky="w", **pad)
+            row = index + 1
+            ttk.Checkbutton(self.toggle_profiles_container, variable=profile_vars["enabled"]).grid(row=row, column=0, sticky="w", **pad)
+            self._key_picker(self.toggle_profiles_container, row, 1, profile_vars["trigger"], "optional_trigger", 8)
+            checks = ttk.Frame(self.toggle_profiles_container)
+            checks.grid(row=row, column=2, sticky="w", **pad)
             selected_vars = profile_vars["selected_vars"]
             if not self.macro_vars:
                 ttk.Label(checks, text="请先在上方添加宏。", foreground="#666666").pack(side="left")
@@ -1033,9 +1085,11 @@ class ConfigWindow:
                         checks,
                         textvariable=macro_vars["name"],
                         variable=selected_vars[macro_id],
-                    ).grid(row=macro_index // 4, column=macro_index % 4, sticky="w", padx=(0, 10), pady=(0, 4))
+                    ).grid(row=0, column=macro_index, sticky="w", padx=(0, 10), pady=(0, 4))
+            ttk.Button(self.toggle_profiles_container, text="删除", width=6, command=lambda row_index=index: self.remove_toggle_profile_row(row_index)).grid(row=row, column=3, sticky="w", **pad)
 
-        ttk.Button(self.toggle_profiles_container, text="添加一键启动", command=self.add_toggle_profile_row).pack(anchor="w")
+        footer_row = len(self.toggle_profile_vars) + 1
+        ttk.Button(self.toggle_profiles_container, text="添加一键启动", command=self.add_toggle_profile_row).grid(row=footer_row, column=0, sticky="w", padx=5, pady=(6, 4))
 
     def set_toggle_profile_rows(self, profiles: list[ToggleProfile]) -> None:
         self.toggle_profile_vars = [self._new_toggle_profile_vars(profile) for profile in profiles]
@@ -1288,6 +1342,7 @@ class ConfigWindow:
             for profile_vars in self.toggle_profile_vars:
                 selected_vars = profile_vars["selected_vars"]
                 toggle_profiles.append(ToggleProfile(
+                    enabled=bool(profile_vars["enabled"].get()),
                     trigger=optional_trigger_label_to_id(str(profile_vars["trigger"].get()).strip()),
                     macro_ids=[macro_id for macro_id, selected_var in selected_vars.items() if selected_var.get()],
                     id=str(profile_vars["id"]),
@@ -1479,6 +1534,7 @@ def blank_macro_config(index: int) -> MacroConfig:
 
 def blank_toggle_profile() -> ToggleProfile:
     return ToggleProfile(
+        enabled=True,
         trigger="none",
         macro_ids=[],
         id=make_stable_id("profile"),
@@ -1488,6 +1544,7 @@ def blank_toggle_profile() -> ToggleProfile:
 def default_toggle_profiles(macros: list[MacroConfig]) -> list[ToggleProfile]:
     return [
         ToggleProfile(
+            enabled=True,
             trigger="f3",
             macro_ids=[macro.id for macro in macros],
             id=make_stable_id("profile"),
@@ -1588,6 +1645,7 @@ def parse_toggle_profiles(raw: dict[str, object], macros: list[MacroConfig]) -> 
                 continue
             macro_ids = item.get("macro_ids", [])
             parsed.append(ToggleProfile(
+                enabled=bool(item.get("enabled", True)),
                 trigger=str(item.get("trigger", "none")).strip(),
                 macro_ids=[str(value).strip() for value in macro_ids] if isinstance(macro_ids, list) else [],
                 id=str(item.get("id", "")).strip(),
@@ -1599,6 +1657,7 @@ def parse_toggle_profiles(raw: dict[str, object], macros: list[MacroConfig]) -> 
         return []
     return normalize_toggle_profiles([
         ToggleProfile(
+            enabled=True,
             trigger=legacy_trigger,
             macro_ids=[macro.id for macro in macros],
             id=make_stable_id("profile"),
@@ -1618,6 +1677,7 @@ def normalize_toggle_profiles(profiles: list[ToggleProfile] | None, macros: list
             if macro_id and macro_id in existing_macro_ids and macro_id not in selected_ids:
                 selected_ids.append(macro_id)
         normalized.append(ToggleProfile(
+            enabled=bool(profile.enabled),
             trigger=optional_trigger_label_to_id(str(profile.trigger)),
             macro_ids=selected_ids,
             id=str(profile.id).strip() or make_stable_id("profile"),
@@ -1655,7 +1715,7 @@ def clone_config(config: Config) -> Config:
             for m in (normalized.macros or [])
         ],
         toggle_profiles=[
-            ToggleProfile(profile.trigger, list(profile.macro_ids), profile.id)
+            ToggleProfile(profile.enabled, profile.trigger, list(profile.macro_ids), profile.id)
             for profile in (normalized.toggle_profiles or [])
         ],
         poll_interval_ms=normalized.poll_interval_ms,
@@ -1823,6 +1883,8 @@ def validate_config(config: Config) -> None:
     for index, profile in enumerate(config.toggle_profiles or []):
         if profile.trigger not in OPTIONAL_TRIGGER_KEYS:
             raise ValueError(f"一键启动配置 {index + 1} 的快捷键无效。")
+        if not profile.enabled:
+            continue
         if profile.trigger == "none":
             continue
         if profile.trigger in seen:
