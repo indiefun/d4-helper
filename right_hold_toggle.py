@@ -1513,10 +1513,11 @@ def make_stable_id(prefix: str) -> str:
 
 def default_macros() -> list[MacroConfig]:
     return [
-        MacroConfig(True, "右键长按", "xbutton1", ACTION_HOLD, ["right", "none", "none", "none"], 100, make_stable_id("macro")),
-        MacroConfig(True, "左键连点", "xbutton2", ACTION_PRESS_CYCLE, ["left", "none", "none", "none"], 100, make_stable_id("macro")),
-        MacroConfig(True, "2/3连按", "f1", ACTION_PRESS_CYCLE, ["2", "3", "none", "none"], 100, make_stable_id("macro")),
+        MacroConfig(True, "旋风斩", "xbutton1", ACTION_HOLD, ["right", "none", "none", "none"], 100, make_stable_id("macro")),
+        MacroConfig(True, "呐喊", "xbutton2", ACTION_PRESS_CYCLE, ["1", "none", "none", "none"], 500, make_stable_id("macro")),
+        MacroConfig(True, "交互", "f1", ACTION_PRESS_CYCLE, ["f", "none", "none", "none"], 100, make_stable_id("macro")),
         MacroConfig(True, "右键连点", "f2", ACTION_PRESS_CYCLE, ["right", "none", "none", "none"], 100, make_stable_id("macro")),
+        MacroConfig(True, "爆发", "middle", ACTION_PRESS_CYCLE, ["2", "3", "none", "none"], 100, make_stable_id("macro")),
     ]
 
 
@@ -1545,8 +1546,8 @@ def default_toggle_profiles(macros: list[MacroConfig]) -> list[ToggleProfile]:
     return [
         ToggleProfile(
             enabled=True,
-            trigger="f3",
-            macro_ids=[macro.id for macro in macros],
+            trigger="e",
+            macro_ids=[macro.id for macro in macros[:3]],
             id=make_stable_id("profile"),
         )
     ]
