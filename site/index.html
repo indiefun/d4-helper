@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>D4Helper - 暗黑破坏神 IV 轻量辅助工具</title>
-  <meta name="description" content="D4Helper 是一个面向暗黑破坏神 IV 的 Windows 轻量辅助工具，支持右键长按、左键连点、键盘循环连按、游戏内浮层和版本更新提示。">
+  <meta name="description" content="D4Helper 是一个面向暗黑破坏神 IV 的 Windows 轻量辅助工具，支持右键长按、左键连点、键盘循环连按、一键启动、游戏内浮层和版本更新提示。">
   <meta property="og:title" content="D4Helper - 暗黑破坏神 IV 轻量辅助工具">
   <meta property="og:description" content="减少重复按键和长按操作，只在暗黑 4 窗口前台时生效。">
   <meta property="og:type" content="website">
@@ -38,8 +38,8 @@
         </div>
         <dl class="hero-stats" aria-label="工具特点">
           <div>
-            <dt>4</dt>
-            <dd>个宏槽位</dd>
+            <dt>+</dt>
+            <dd>宏可增删</dd>
           </div>
           <div>
             <dt>0</dt>
@@ -78,6 +78,11 @@
             <strong>右键连点</strong>
             <em>开启</em>
           </div>
+          <div class="macro-row">
+            <span>F3</span>
+            <strong>一键启动</strong>
+            <em>组合</em>
+          </div>
         </div>
       </div>
     </section>
@@ -94,6 +99,10 @@
           <p>开关键以录制为主，点“录”后按一次目标键即可绑定。常用键也可以点“选”快速设置，界面更清爽。</p>
         </article>
         <article>
+          <h3>一键启动</h3>
+          <p>用一行配置选择快捷键和要控制的宏。每个一键启动都可以单独启用或关闭，按一次打开一组宏，再按一次关闭。</p>
+        </article>
+        <article>
           <h3>循环连按</h3>
           <p>最多配置 4 个槽位，支持数字、字母、F 键、空格、鼠标左键、右键和中键。程序按顺序循环触发，并自动跳过空槽位。</p>
         </article>
@@ -103,7 +112,7 @@
         </article>
         <article>
           <h3>窗口限定</h3>
-          <p>只在匹配到暗黑 4 前台窗口时生效。切出游戏后会自动释放长按并停止循环，避免误触桌面或其他软件。</p>
+          <p>只在匹配到暗黑 4 前台窗口时生效。切出游戏后会自动释放长按、停止循环并清理状态，避免误触桌面或其他软件。</p>
         </article>
         <article>
           <h3>游戏内浮层</h3>
@@ -124,12 +133,12 @@
       <div class="section-heading">
         <p class="eyebrow">Screenshots</p>
         <h2>配置清楚，状态一眼可见</h2>
-        <p>主界面保留必要设置，浮层只显示游戏中真正需要确认的信息。</p>
+        <p>主界面保留宏配置和一键启动，高级选项收进菜单，浮层只显示游戏中真正需要确认的信息。</p>
       </div>
       <div class="shot-grid">
         <figure>
           <img src="assets/config-window.png" alt="D4Helper 配置页面截图">
-          <figcaption>配置页面：窗口匹配、宏槽位、浮层、版本更新和支持反馈集中在一个窗口。</figcaption>
+          <figcaption>配置页面：宏配置和一键启动集中在主界面，窗口匹配、浮层位置等放在高级设置里。</figcaption>
         </figure>
         <figure>
           <img src="assets/overlay.png" alt="D4Helper 游戏内浮层截图">
@@ -162,14 +171,14 @@
           <span>3</span>
           <div>
             <h3>调整宏槽位</h3>
-            <p>选择开关键、动作、目标按键和连按间隔。默认配置已经适合直接试用。</p>
+            <p>选择开关键、动作、目标按键和连按间隔；需要组合开关时，在“一键启动”里勾选要控制的宏。</p>
           </div>
         </li>
         <li>
           <span>4</span>
           <div>
             <h3>保存并回到游戏</h3>
-            <p>点击“保存并应用”，回到暗黑 4 后用侧键或 F 键开启、关闭对应宏。</p>
+            <p>点击“保存并应用”，回到暗黑 4 后用侧键或 F 键开启、关闭对应宏或一键启动组合。</p>
           </div>
         </li>
       </ol>
@@ -183,6 +192,7 @@
           <li><strong>侧键 2</strong><span>切换左键连点</span></li>
           <li><strong>F1</strong><span>切换 2 -> 3 循环连按</span></li>
           <li><strong>F2</strong><span>切换右键连点</span></li>
+          <li><strong>F3</strong><span>一键开关一组宏</span></li>
         </ul>
       </div>
       <div class="detail-card">
@@ -191,6 +201,15 @@
           <li><strong>无</strong><span>禁用当前宏槽位</span></li>
           <li><strong>自动按住</strong><span>按一次开启，再按一次释放</span></li>
           <li><strong>循环连按</strong><span>按槽位顺序循环短按</span></li>
+        </ul>
+      </div>
+      <div class="detail-card">
+        <h2>一键启动</h2>
+        <ul>
+          <li><strong>单行配置</strong><span>启用、快捷键、控制宏一行完成</span></li>
+          <li><strong>可关闭</strong><span>未启用时不响应快捷键</span></li>
+          <li><strong>组合开关</strong><span>按一次开启一组宏，再按一次关闭</span></li>
+          <li><strong>默认 F3</strong><span>适合快速进入常用状态</span></li>
         </ul>
       </div>
       <div class="detail-card">
