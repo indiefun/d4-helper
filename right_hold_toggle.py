@@ -564,7 +564,8 @@ class MacroEngine:
             return
         self.active_macros.add(macro.id)
         if macro.action == ACTION_HOLD:
-            self.press_hold_item(first_hold_item(macro))
+            for item in hold_items(macro):
+                self.press_hold_item(item)
         elif macro.action == ACTION_PRESS_CYCLE:
             self.next_press_at[macro.id] = 0.0
             self.sequence_index[macro.id] = 0
@@ -573,7 +574,8 @@ class MacroEngine:
         if macro.id in self.active_macros:
             self.active_macros.remove(macro.id)
             if macro.action == ACTION_HOLD:
-                self.release_hold_item(first_hold_item(macro))
+                for item in hold_items(macro):
+                    self.release_hold_item(item)
             self.next_press_at.pop(macro.id, None)
             self.sequence_index.pop(macro.id, None)
 
@@ -935,7 +937,7 @@ class ConfigWindow:
 
         macros = ttk.LabelFrame(main, text="宏配置")
         macros.pack(fill="x", pady=(0, 8))
-        self._help_label(macros, "每个按键格右侧都有“录”和“选”。推荐点“录”后按一次目标键；常用键可以点“选”。支持自由添加或删除宏。录入时按 Esc 取消。").pack(anchor="w", padx=5, pady=(4, 6))
+        self._help_label(macros, "每个按键格右侧都有“录”和“选”。自动按住会同时按住槽位 1-4 里的按键；循环连按会按槽位顺序短按，间隔只对循环连按生效。录入时按 Esc 取消。").pack(anchor="w", padx=5, pady=(4, 6))
         self.macro_rows_container = ttk.Frame(macros)
         self.macro_rows_container.pack(fill="x", padx=5, pady=(0, 6))
         self._render_macro_rows()
@@ -986,11 +988,19 @@ class ConfigWindow:
             ttk.Checkbutton(self.macro_rows_container, variable=vars_for_row["enabled"]).grid(row=row, column=0, sticky="w", **pad)
             ttk.Entry(self.macro_rows_container, textvariable=vars_for_row["name"], width=11).grid(row=row, column=1, sticky="w", **pad)
             self._key_picker(self.macro_rows_container, row, 2, vars_for_row["trigger"], "trigger", 8)
-            ttk.Combobox(self.macro_rows_container, textvariable=vars_for_row["action"], values=action_values, state="readonly", width=10).grid(row=row, column=3, sticky="w", **pad)
+            action_combo = ttk.Combobox(self.macro_rows_container, textvariable=vars_for_row["action"], values=action_values, state="readonly", width=10)
+            action_combo.grid(row=row, column=3, sticky="w", **pad)
+            action_combo.bind("<<ComboboxSelected>>", lambda _event, row_vars=vars_for_row: self._on_macro_action_changed(row_vars))
+            vars_for_row["action_widget"] = action_combo
+            slot_widgets = {}
             for offset, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
-                self._key_picker(self.macro_rows_container, row, 4 + offset, vars_for_row[slot_name], "press", 6)
-            ttk.Spinbox(self.macro_rows_container, from_=MIN_MACRO_INTERVAL_MS, to=5000, increment=5, textvariable=vars_for_row["interval"], width=8).grid(row=row, column=8, sticky="w", **pad)
+                slot_widgets[slot_name] = self._key_picker(self.macro_rows_container, row, 4 + offset, vars_for_row[slot_name], "press", 6)
+            vars_for_row["slot_widgets"] = slot_widgets
+            interval_widget = ttk.Spinbox(self.macro_rows_container, from_=MIN_MACRO_INTERVAL_MS, to=5000, increment=5, textvariable=vars_for_row["interval"], width=8)
+            interval_widget.grid(row=row, column=8, sticky="w", **pad)
+            vars_for_row["interval_widget"] = interval_widget
             ttk.Button(self.macro_rows_container, text="删除", width=6, command=lambda row_index=index: self.remove_macro_row(row_index)).grid(row=row, column=9, sticky="w", **pad)
+            self._update_macro_row_state(vars_for_row)
 
         footer_row = len(self.macro_vars) + 1
         ttk.Button(self.macro_rows_container, text="添加宏", command=self.add_macro_row).grid(row=footer_row, column=0, sticky="w", padx=5, pady=(6, 4))
@@ -1109,13 +1119,48 @@ class ConfigWindow:
         self._fit_to_content()
         self.status_var.set("已删除一键启动配置")
 
-    def _key_picker(self, parent: tk.Widget, row: int, column: int, value_var: tk.StringVar, kind: str, width: int) -> None:
+    def _on_macro_action_changed(self, vars_for_row: dict[str, object]) -> None:
+        self._update_macro_row_state(vars_for_row)
+        action = action_label_to_id(str(vars_for_row["action"].get()))
+        if action == ACTION_HOLD:
+            self.status_var.set("自动按住会同时按住所有非“无”的槽位，间隔不生效")
+        elif action == ACTION_PRESS_CYCLE:
+            self.status_var.set("循环连按会按槽位顺序短按，间隔越小触发越快")
+        else:
+            self.status_var.set("当前宏动作已设为无")
+
+    def _update_macro_row_state(self, vars_for_row: dict[str, object]) -> None:
+        action = action_label_to_id(str(vars_for_row["action"].get()))
+        slots_enabled = action in {ACTION_HOLD, ACTION_PRESS_CYCLE}
+        interval_enabled = action == ACTION_PRESS_CYCLE
+        for widget in dict(vars_for_row.get("slot_widgets", {})).values():
+            self._set_widget_tree_enabled(widget, slots_enabled)
+        interval_widget = vars_for_row.get("interval_widget")
+        if isinstance(interval_widget, tk.Widget):
+            self._set_widget_enabled(interval_widget, interval_enabled)
+
+    def _set_widget_tree_enabled(self, widget: tk.Widget, enabled: bool) -> None:
+        self._set_widget_enabled(widget, enabled)
+        for child in widget.winfo_children():
+            self._set_widget_tree_enabled(child, enabled)
+
+    def _set_widget_enabled(self, widget: tk.Widget, enabled: bool) -> None:
+        try:
+            if isinstance(widget, ttk.Entry):
+                widget.configure(state="readonly" if enabled else "disabled")
+            else:
+                widget.configure(state="normal" if enabled else "disabled")
+        except tk.TclError:
+            return
+
+    def _key_picker(self, parent: tk.Widget, row: int, column: int, value_var: tk.StringVar, kind: str, width: int) -> ttk.Frame:
         pad = {"padx": 5, "pady": 4}
         frame = ttk.Frame(parent)
         frame.grid(row=row, column=column, sticky="w", **pad)
         ttk.Entry(frame, textvariable=value_var, width=width, state="readonly").pack(side="left")
         ttk.Button(frame, text="录", width=3, command=lambda: self.record_key(value_var, kind)).pack(side="left", padx=(3, 0))
         ttk.Button(frame, text="选", width=3, command=lambda: self.show_key_menu(frame, value_var, kind)).pack(side="left", padx=(3, 0))
+        return frame
 
     def show_key_menu(self, anchor: tk.Widget, value_var: tk.StringVar, kind: str) -> None:
         menu = tk.Menu(anchor, tearoff=False)
@@ -1615,9 +1660,9 @@ def normalize_sequence(sequence: list[str] | None) -> list[str]:
     return normalized
 
 
-def first_hold_item(macro: MacroConfig) -> str:
+def hold_items(macro: MacroConfig) -> list[str]:
     sequence = normalize_sequence(macro.sequence)
-    return sequence[0] if sequence[0] != "none" else "right"
+    return [item for item in sequence if item != "none"]
 
 
 def normalize_macros(macros: list[MacroConfig] | None) -> list[MacroConfig]:
@@ -1870,8 +1915,8 @@ def validate_config(config: Config) -> None:
             raise ValueError(f"{macro.name} 的开关键无效。")
         if macro.action not in ACTION_LABELS:
             raise ValueError(f"{macro.name} 的动作无效。")
-        if macro.action == ACTION_HOLD and first_hold_item(macro) == "none":
-            raise ValueError(f"{macro.name} 的自动按住槽位 1 不能为“无”。")
+        if macro.action == ACTION_HOLD and not hold_items(macro):
+            raise ValueError(f"{macro.name} 的自动按住槽位不能全为“无”。")
         if macro.action == ACTION_PRESS_CYCLE and not [item for item in macro.sequence if item != "none"]:
             raise ValueError(f"{macro.name} 的循环槽位不能全为“无”。")
         if macro.enabled and macro.action != ACTION_NONE:
