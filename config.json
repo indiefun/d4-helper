@@ -4,34 +4,6 @@
   "macros": [
     {
       "enabled": true,
-      "name": "旋风斩",
-      "trigger": "xbutton1",
-      "action": "hold",
-      "sequence": [
-        "right",
-        "none",
-        "none",
-        "none"
-      ],
-      "interval_ms": 100,
-      "id": "macro_192d1613f0ca"
-    },
-    {
-      "enabled": true,
-      "name": "呐喊",
-      "trigger": "xbutton2",
-      "action": "press_cycle",
-      "sequence": [
-        "1",
-        "none",
-        "none",
-        "none"
-      ],
-      "interval_ms": 500,
-      "id": "macro_913417bd3f7b"
-    },
-    {
-      "enabled": true,
       "name": "交互",
       "trigger": "f1",
       "action": "press_cycle",
@@ -42,7 +14,9 @@
         "none"
       ],
       "interval_ms": 100,
-      "id": "macro_6cabdbdd74c7"
+      "id": "macro_6cabdbdd74c7",
+      "playback_mode": "once",
+      "recording": []
     },
     {
       "enabled": true,
@@ -56,31 +30,68 @@
         "none"
       ],
       "interval_ms": 100,
-      "id": "macro_795e8f90f19b"
+      "id": "macro_795e8f90f19b",
+      "playback_mode": "once",
+      "recording": []
     },
     {
       "enabled": true,
-      "name": "爆发",
-      "trigger": "middle",
-      "action": "press_cycle",
+      "name": "旋风斩",
+      "trigger": "f3",
+      "action": "hold",
       "sequence": [
-        "2",
-        "3",
+        "right",
+        "none",
         "none",
         "none"
       ],
       "interval_ms": 100,
-      "id": "macro_380dafb58854"
+      "id": "macro_d5e130410039",
+      "playback_mode": "once",
+      "recording": []
+    },
+    {
+      "enabled": true,
+      "name": "增益技能",
+      "trigger": "f4",
+      "action": "press_cycle",
+      "sequence": [
+        "2",
+        "1",
+        "3",
+        "4"
+      ],
+      "interval_ms": 100,
+      "id": "macro_639ed922028b",
+      "playback_mode": "once",
+      "recording": []
+    },
+    {
+      "enabled": true,
+      "name": "大招",
+      "trigger": "f5",
+      "action": "press_cycle",
+      "sequence": [
+        "left",
+        "none",
+        "none",
+        "none"
+      ],
+      "interval_ms": 1000,
+      "id": "macro_1ab382a5f373",
+      "playback_mode": "once",
+      "recording": []
     }
   ],
   "toggle_profiles": [
     {
       "enabled": true,
-      "trigger": "e",
+      "trigger": "middle",
       "macro_ids": [
-        "macro_192d1613f0ca",
-        "macro_913417bd3f7b",
-        "macro_6cabdbdd74c7"
+        "macro_6cabdbdd74c7",
+        "macro_d5e130410039",
+        "macro_639ed922028b",
+        "macro_1ab382a5f373"
       ],
       "id": "profile_1c6916323e1f"
     }
@@ -89,5 +100,8 @@
   "overlay_enabled": true,
   "overlay_x": 20,
   "overlay_y": 20,
-  "overlay_opacity": 0.62
+  "overlay_opacity": 0.6,
+  "recording_trigger": "f12",
+  "recording_countdown_sec": 3,
+  "recording_max_seconds": 30
 }

@@ -141,6 +141,9 @@ ERROR_ALREADY_EXISTS = 183
 ACTION_NONE = "none"
 ACTION_HOLD = "hold"
 ACTION_PRESS_CYCLE = "press_cycle"
+ACTION_RECORDED = "recorded"
+PLAYBACK_ONCE = "once"
+PLAYBACK_LOOP = "loop"
 
 KEYBOARD_KEYS = {
     **{str(index): 0x30 + index for index in range(10)},
@@ -221,6 +224,11 @@ ACTION_LABELS = {
     ACTION_NONE: "无",
     ACTION_HOLD: "自动按住",
     ACTION_PRESS_CYCLE: "循环连按",
+    ACTION_RECORDED: "录制回放",
+}
+PLAYBACK_MODE_LABELS = {
+    PLAYBACK_ONCE: "执行一次",
+    PLAYBACK_LOOP: "循环执行",
 }
 PRESS_KEYS = {
     "none": None,
@@ -314,6 +322,11 @@ RECORDABLE_KEYS = {
 RECORD_CANCEL_KEY = 0x1B
 DEFAULT_INTERVAL_MS = 100
 MIN_MACRO_INTERVAL_MS = 25
+DEFAULT_OVERLAY_OPACITY = 0.60
+DEFAULT_RECORD_TRIGGER = "f12"
+DEFAULT_RECORD_COUNTDOWN_SEC = 3
+DEFAULT_RECORD_MAX_SECONDS = 30
+MAX_RECORDED_EVENTS = 500
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -357,6 +370,8 @@ user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 user32.GetWindowRect.restype = wintypes.BOOL
 user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
 user32.GetCursorPos.restype = wintypes.BOOL
+user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+user32.SetCursorPos.restype = wintypes.BOOL
 user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
 user32.SendInput.restype = wintypes.UINT
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
@@ -400,6 +415,8 @@ class MacroConfig:
     sequence: list[str]
     interval_ms: int = DEFAULT_INTERVAL_MS
     id: str = ""
+    playback_mode: str = PLAYBACK_ONCE
+    recording: list[dict[str, object]] | None = None
 
 
 @dataclass
@@ -420,7 +437,10 @@ class Config:
     overlay_enabled: bool = True
     overlay_x: int = 20
     overlay_y: int = 20
-    overlay_opacity: float = 0.82
+    overlay_opacity: float = DEFAULT_OVERLAY_OPACITY
+    recording_trigger: str = DEFAULT_RECORD_TRIGGER
+    recording_countdown_sec: int = DEFAULT_RECORD_COUNTDOWN_SEC
+    recording_max_seconds: int = DEFAULT_RECORD_MAX_SECONDS
 
 
 @dataclass(frozen=True)
@@ -430,12 +450,18 @@ class Snapshot:
     config: Config
     foreground_title: str
     foreground_process: str
+    recording_status: str = "idle"
+    recording_trigger: str = DEFAULT_RECORD_TRIGGER
+    recording_countdown_remaining: int = 0
+    recording_elapsed_ms: int = 0
+    recording_event_count: int = 0
 
 
 class MacroEngine:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, event_queue: queue.Queue[object] | None = None) -> None:
         self.lock = threading.RLock()
         self.config = normalize_config(config)
+        self.event_queue = event_queue
         self.running = False
         self.thread: threading.Thread | None = None
         self.right_is_down = False
@@ -446,9 +472,16 @@ class MacroEngine:
         self.last_trigger_down: dict[str, bool] = {}
         self.next_press_at: dict[str, float] = {}
         self.sequence_index: dict[str, int] = {}
+        self.playback_state: dict[str, dict[str, object]] = {}
+        self.playback_held_items: dict[str, set[str]] = {}
         self.target_active = False
         self.foreground_title = ""
         self.foreground_process = ""
+        self.recording_status = "idle"
+        self.recording_countdown_until = 0.0
+        self.recording_started_at = 0.0
+        self.recorded_events: list[dict[str, object]] = []
+        self.record_last_down: dict[str, bool] = {}
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -474,6 +507,7 @@ class MacroEngine:
             self.last_trigger_down = {}
             self.next_press_at = {}
             self.sequence_index = {}
+            self.playback_state = {}
         self.release_all_inputs()
 
     def snapshot(self) -> Snapshot:
@@ -484,6 +518,11 @@ class MacroEngine:
                 config=clone_config(self.config),
                 foreground_title=self.foreground_title,
                 foreground_process=self.foreground_process,
+                recording_status=self.recording_status,
+                recording_trigger=self.config.recording_trigger,
+                recording_countdown_remaining=max(0, int(self.recording_countdown_until - time.monotonic() + 0.99)) if self.recording_status == "countdown" else 0,
+                recording_elapsed_ms=max(0, int((time.monotonic() - self.recording_started_at) * 1000)) if self.recording_status == "recording" else 0,
+                recording_event_count=len(self.recorded_events),
             )
 
     def _run(self) -> None:
@@ -507,13 +546,19 @@ class MacroEngine:
                     self.active_macros.clear()
                     self.next_press_at.clear()
                     self.sequence_index.clear()
+                    self.playback_state.clear()
                     release_on_focus_loss = True
+                if not target_active and self.recording_status in {"countdown", "recording"}:
+                    self._cancel_recording_locked()
+
+                self._handle_recording_trigger_locked(config, target_active)
+                recording_blocks_macros = self.recording_status in {"countdown", "recording"}
 
                 for profile in config.toggle_profiles or []:
                     if not profile.enabled:
                         continue
                     virtual_key = TRIGGER_KEYS.get(profile.trigger)
-                    down = is_key_down(virtual_key) if target_active and virtual_key is not None else False
+                    down = is_key_down(virtual_key) if target_active and not recording_blocks_macros and virtual_key is not None else False
                     trigger_key = f"profile:{profile.id}"
                     if target_active and down and not self.last_trigger_down.get(trigger_key, False):
                         self._toggle_profile(profile, config.macros or [])
@@ -525,7 +570,7 @@ class MacroEngine:
                     virtual_key = TRIGGER_KEYS.get(macro.trigger)
                     if virtual_key is None:
                         continue
-                    down = is_key_down(virtual_key)
+                    down = is_key_down(virtual_key) if target_active and not recording_blocks_macros else False
                     trigger_key = f"macro:{macro.id}"
                     if target_active and down and not self.last_trigger_down.get(trigger_key, False):
                         self._toggle_macro(macro)
@@ -535,11 +580,18 @@ class MacroEngine:
                     macro for macro in (config.macros or [])
                     if target_active and macro.enabled and macro.action == ACTION_PRESS_CYCLE and macro.id in self.active_macros
                 ]
+                active_recorded_macros = [
+                    macro for macro in (config.macros or [])
+                    if target_active and macro.enabled and macro.action == ACTION_RECORDED and macro.id in self.active_macros
+                ]
 
             if release_on_focus_loss:
                 self.release_all_inputs()
 
             now = time.monotonic()
+            with self.lock:
+                self._advance_recording_locked(config, target_active, now)
+
             for macro in active_cycle_macros:
                 if now >= self.next_press_at.get(macro.id, 0.0):
                     sequence = [item for item in macro.sequence if item != "none"]
@@ -549,7 +601,11 @@ class MacroEngine:
                         self.sequence_index[macro.id] = index + 1
                         self.next_press_at[macro.id] = now + (max(macro.interval_ms, MIN_MACRO_INTERVAL_MS) / 1000)
 
-            time.sleep(max(config.poll_interval_ms, 50) / 1000)
+            for macro in active_recorded_macros:
+                self._advance_recorded_playback(macro, now)
+
+            recording_active = self.recording_status == "recording"
+            time.sleep(0.01 if recording_active else max(config.poll_interval_ms, 50) / 1000)
 
         self.release_all_inputs()
 
@@ -569,6 +625,8 @@ class MacroEngine:
         elif macro.action == ACTION_PRESS_CYCLE:
             self.next_press_at[macro.id] = 0.0
             self.sequence_index[macro.id] = 0
+        elif macro.action == ACTION_RECORDED:
+            self.playback_state[macro.id] = {"started_at": time.monotonic(), "index": 0}
 
     def _deactivate_macro(self, macro: MacroConfig) -> None:
         if macro.id in self.active_macros:
@@ -578,6 +636,9 @@ class MacroEngine:
                     self.release_hold_item(item)
             self.next_press_at.pop(macro.id, None)
             self.sequence_index.pop(macro.id, None)
+            self.playback_state.pop(macro.id, None)
+            if macro.action == ACTION_RECORDED:
+                self.release_playback_items(macro.id)
 
     def _toggle_profile(self, profile: ToggleProfile, macros: list[MacroConfig]) -> None:
         selected_ids = set(profile.macro_ids or [])
@@ -590,6 +651,155 @@ class MacroEngine:
             return
         for macro in eligible:
             self._activate_macro(macro)
+
+    def _handle_recording_trigger_locked(self, config: Config, target_active: bool) -> None:
+        virtual_key = OPTIONAL_TRIGGER_KEYS.get(config.recording_trigger)
+        down = is_key_down(virtual_key) if target_active and virtual_key is not None else False
+        trigger_key = "recording:toggle"
+        if target_active and down and not self.last_trigger_down.get(trigger_key, False):
+            if self.recording_status == "idle":
+                self._start_recording_countdown_locked(config)
+            elif self.recording_status in {"countdown", "recording"}:
+                if self.recording_status == "recording":
+                    self._capture_recording_changes_locked(config, time.monotonic())
+                self._finish_recording_locked()
+        self.last_trigger_down[trigger_key] = down
+
+    def _start_recording_countdown_locked(self, config: Config) -> None:
+        self.active_macros.clear()
+        self.next_press_at.clear()
+        self.sequence_index.clear()
+        self.playback_state.clear()
+        self.release_all_inputs()
+        self.recorded_events = []
+        self.record_last_down = {}
+        self.recording_status = "countdown"
+        self.recording_countdown_until = time.monotonic() + max(int(config.recording_countdown_sec), 0)
+
+    def _advance_recording_locked(self, config: Config, target_active: bool, now: float) -> None:
+        if not target_active:
+            return
+        if self.recording_status == "countdown" and now >= self.recording_countdown_until:
+            self.recording_status = "recording"
+            self.recording_started_at = now
+            self.record_last_down = self._current_recordable_states(config)
+        if self.recording_status != "recording":
+            return
+        if now - self.recording_started_at >= max(int(config.recording_max_seconds), 1):
+            self._finish_recording_locked()
+            return
+        self._capture_recording_changes_locked(config, now)
+
+    def _capture_recording_changes_locked(self, config: Config, now: float) -> None:
+        current = self._current_recordable_states(config)
+        at_ms = int((now - self.recording_started_at) * 1000)
+        for key_id, down in current.items():
+            previous = self.record_last_down.get(key_id, False)
+            if down != previous:
+                event: dict[str, object] = {
+                    "type": "key_down" if down else "key_up",
+                    "key": key_id,
+                    "at_ms": at_ms,
+                }
+                if key_id in {"left", "right", "middle"}:
+                    cursor_pos = get_cursor_position()
+                    if cursor_pos is not None:
+                        event["x"] = cursor_pos[0]
+                        event["y"] = cursor_pos[1]
+                self.recorded_events.append(event)
+                if len(self.recorded_events) >= MAX_RECORDED_EVENTS:
+                    self._finish_recording_locked()
+                    return
+        self.record_last_down = current
+
+    def _current_recordable_states(self, config: Config) -> dict[str, bool]:
+        recording_virtual_key = OPTIONAL_TRIGGER_KEYS.get(config.recording_trigger)
+        states: dict[str, bool] = {}
+        for key_id, virtual_key in RECORDABLE_KEYS.items():
+            if key_id in {"xbutton1", "xbutton2"}:
+                continue
+            if virtual_key == recording_virtual_key:
+                continue
+            states[key_id] = is_key_down(virtual_key)
+        return states
+
+    def _finish_recording_locked(self) -> None:
+        if self.recording_status == "recording" and self.event_queue is not None:
+            recording = self._trim_recording(self.recorded_events) if self.recorded_events else []
+            self.event_queue.put({"type": "recording_done", "events": recording})
+        self.recording_status = "idle"
+        self.recording_countdown_until = 0.0
+        self.recording_started_at = 0.0
+        self.recorded_events = []
+        self.record_last_down = {}
+        self.release_all_inputs()
+
+    def _cancel_recording_locked(self) -> None:
+        self.recording_status = "idle"
+        self.recording_countdown_until = 0.0
+        self.recording_started_at = 0.0
+        self.recorded_events = []
+        self.record_last_down = {}
+
+    def _trim_recording(self, events: list[dict[str, object]]) -> list[dict[str, object]]:
+        if not events:
+            return []
+        first_at = int(events[0].get("at_ms", 0))
+        trimmed = [
+            {**event, "at_ms": max(0, int(event.get("at_ms", 0)) - first_at)}
+            for event in events
+        ]
+        held_items: set[str] = set()
+        for event in trimmed:
+            item = press_key_label_to_id(str(event.get("key", "")))
+            if str(event.get("type", "")) == "key_down":
+                held_items.add(item)
+            else:
+                held_items.discard(item)
+        last_at = int(trimmed[-1].get("at_ms", 0))
+        for item in sorted(held_items):
+            trimmed.append({"type": "key_up", "key": item, "at_ms": last_at + 10})
+        return trimmed
+
+    def _advance_recorded_playback(self, macro: MacroConfig, now: float) -> None:
+        recording = normalize_recording(macro.recording)
+        if not recording:
+            with self.lock:
+                self._deactivate_macro(macro)
+            return
+        state = self.playback_state.setdefault(macro.id, {"started_at": now, "index": 0})
+        started_at = float(state.get("started_at", now))
+        index = int(state.get("index", 0))
+        elapsed_ms = int((now - started_at) * 1000)
+        while index < len(recording) and int(recording[index].get("at_ms", 0)) <= elapsed_ms:
+            self._play_recorded_event(macro.id, recording[index])
+            index += 1
+        if index >= len(recording):
+            if macro.playback_mode == PLAYBACK_LOOP:
+                self.release_playback_items(macro.id)
+                loop_delay = max(macro.interval_ms, MIN_MACRO_INTERVAL_MS) / 1000
+                state["started_at"] = now + loop_delay
+                state["index"] = 0
+            else:
+                with self.lock:
+                    self._deactivate_macro(macro)
+        else:
+            state["index"] = index
+
+    def _play_recorded_event(self, macro_id: str, event: dict[str, object]) -> None:
+        item = press_key_label_to_id(str(event.get("key", "")))
+        held_items = self.playback_held_items.setdefault(macro_id, set())
+        if str(event.get("type", "")) == "key_down":
+            if not self._item_is_held(item):
+                play_recorded_event(event)
+            held_items.add(item)
+            return
+
+        held_items.discard(item)
+        if not held_items:
+            self.playback_held_items.pop(macro_id, None)
+        if not self._item_is_held(item):
+            play_recorded_event(event)
 
     def press_right(self) -> None:
         if self.right_is_down:
@@ -655,11 +865,33 @@ class MacroEngine:
             send_key_input(virtual_key, KEYEVENTF_KEYUP)
             self.held_keys.remove(virtual_key)
 
+    def _item_is_held(self, item: str) -> bool:
+        if item == "left" and self.left_is_down:
+            return True
+        if item == "right" and self.right_is_down:
+            return True
+        if item == "middle" and self.middle_is_down:
+            return True
+        if item in PRESS_KEYS and isinstance(PRESS_KEYS[item], int) and PRESS_KEYS[item] in self.held_keys:
+            return True
+        return any(item in held_items for held_items in self.playback_held_items.values())
+
+    def release_playback_items(self, macro_id: str | None = None) -> None:
+        if macro_id is None:
+            items = set().union(*self.playback_held_items.values()) if self.playback_held_items else set()
+            self.playback_held_items.clear()
+        else:
+            items = self.playback_held_items.pop(macro_id, set())
+        for item in items:
+            if not self._item_is_held(item):
+                release_recorded_item(item)
+
     def release_all_inputs(self) -> None:
         self.release_right()
         self.release_left()
         self.release_middle()
         self.release_all_keys()
+        self.release_playback_items()
 
 class OverlayWindow:
     def __init__(self, root: tk.Tk, engine: MacroEngine) -> None:
@@ -673,7 +905,7 @@ class OverlayWindow:
         self.window.overrideredirect(True)
         self.window.attributes("-topmost", True)
         self.window.configure(bg="#111111")
-        self.window.attributes("-alpha", 0.62)
+        self.window.attributes("-alpha", DEFAULT_OVERLAY_OPACITY)
         self._last_geometry = ""
         self._overlay_style_applied = False
 
@@ -694,11 +926,12 @@ class OverlayWindow:
             return
 
         visible_macros, total_count = self._visible_macros(snapshot)
-        if not visible_macros and total_count == 0:
+        recording_visible = snapshot.recording_status in {"countdown", "recording"}
+        if not recording_visible and not visible_macros and total_count == 0:
             self.window.withdraw()
             return
 
-        self.height = self._height_for_rows(len(visible_macros))
+        self.height = 82 if recording_visible else self._height_for_rows(len(visible_macros))
         self._draw(snapshot, visible_macros, total_count)
         self.window.attributes("-alpha", clamp(snapshot.config.overlay_opacity, 0.2, 1.0))
 
@@ -752,6 +985,10 @@ class OverlayWindow:
         self.canvas.delete("all")
         self.canvas.configure(width=self.width, height=self.height)
         self.canvas.create_rectangle(0, 0, self.width, self.height, fill="#111111", outline="#3a3a3a")
+        if snapshot.recording_status in {"countdown", "recording"}:
+            self._draw_recording(snapshot)
+            self.canvas.update_idletasks()
+            return
         active_count = sum(1 for macro_id, enabled in snapshot.macro_states.items() if enabled)
         self.canvas.create_text(
             10,
@@ -776,6 +1013,42 @@ class OverlayWindow:
         for index, macro in enumerate(visible_macros):
             self._draw_status_row(28 + index * 22, macro, snapshot.macro_states.get(macro.id, False))
         self.canvas.update_idletasks()
+
+    def _draw_recording(self, snapshot: Snapshot) -> None:
+        self.canvas.create_text(
+            10,
+            9,
+            text="D4Helper",
+            fill="#d6d6d6",
+            font=("Microsoft YaHei UI", 9, "bold"),
+            anchor="nw",
+        )
+        trigger_text = optional_trigger_id_to_label(snapshot.recording_trigger)
+        if snapshot.recording_status == "countdown":
+            status_text = f"录制准备中：{snapshot.recording_countdown_remaining}"
+            detail_text = f"按 {trigger_text} 停止"
+            color = "#facc15"
+        else:
+            seconds = snapshot.recording_elapsed_ms // 1000
+            status_text = "● 正在录制宏"
+            detail_text = f"{seconds:02d}s / {snapshot.recording_event_count} 个动作，按 {trigger_text} 停止"
+            color = "#ef4444"
+        self.canvas.create_text(
+            12,
+            30,
+            text=status_text,
+            fill=color,
+            font=("Microsoft YaHei UI", 10, "bold"),
+            anchor="nw",
+        )
+        self.canvas.create_text(
+            12,
+            52,
+            text=self._ellipsize(detail_text, 28),
+            fill="#e5e7eb",
+            font=("Microsoft YaHei UI", 8, "bold"),
+            anchor="nw",
+        )
 
     def _avoid_cursor(self, x: int, y: int, window_rect: wintypes.RECT) -> tuple[int, int]:
         point = wintypes.POINT()
@@ -832,7 +1105,7 @@ class OverlayWindow:
         return 30 + max(row_count, 1) * 22 + 8
 
 class ConfigWindow:
-    def __init__(self, root: tk.Tk, engine: MacroEngine, command_queue: queue.Queue[str], config_path: Path) -> None:
+    def __init__(self, root: tk.Tk, engine: MacroEngine, command_queue: queue.Queue[object], config_path: Path) -> None:
         self.root = root
         self.engine = engine
         self.command_queue = command_queue
@@ -851,6 +1124,10 @@ class ConfigWindow:
         self.overlay_y_var = tk.IntVar()
         self.overlay_opacity_var = tk.DoubleVar()
         self.overlay_opacity_text_var = tk.StringVar()
+        self.recording_trigger_var = tk.StringVar()
+        self.recording_countdown_var = tk.IntVar()
+        self.recording_max_seconds_var = tk.IntVar()
+        self.recording_hint_var = tk.StringVar()
         self.status_var = tk.StringVar()
         self.version_status_var = tk.StringVar(value=f"当前版本：v{APP_VERSION}")
         self.latest_release_url = GITHUB_RELEASES_URL
@@ -867,6 +1144,7 @@ class ConfigWindow:
         self._build()
         self.load_from_engine()
         self.overlay_opacity_var.trace_add("write", lambda *_args: self._update_opacity_text())
+        self.recording_trigger_var.trace_add("write", lambda *_args: self._update_recording_hint())
         self._fit_to_content()
 
     def _help_label(self, parent: tk.Widget, text: str) -> ttk.Label:
@@ -969,6 +1247,8 @@ class ConfigWindow:
             "slot3": tk.StringVar(value=press_key_id_to_label(sequence[2])),
             "slot4": tk.StringVar(value=press_key_id_to_label(sequence[3])),
             "interval": tk.StringVar(value=str(macro.interval_ms)),
+            "playback_mode": tk.StringVar(value=playback_mode_id_to_label(macro.playback_mode)),
+            "recording": normalize_recording(macro.recording),
         }
 
     def _render_macro_rows(self) -> None:
@@ -978,9 +1258,10 @@ class ConfigWindow:
             child.destroy()
 
         pad = {"padx": 5, "pady": 4}
-        headers = ["启用", "名称", "开关键", "动作", "槽位1", "槽位2", "槽位3", "槽位4", "间隔(ms)", "操作"]
+        headers = ["启用", "名称", "开关键", "动作", "动作配置", "间隔(ms)", "操作"]
         for col, header in enumerate(headers):
             ttk.Label(self.macro_rows_container, text=header).grid(row=0, column=col, sticky="w", **pad)
+        self.macro_rows_container.columnconfigure(4, weight=1)
 
         action_values = list(ACTION_LABELS.values())
         for index, vars_for_row in enumerate(self.macro_vars):
@@ -992,20 +1273,20 @@ class ConfigWindow:
             action_combo.grid(row=row, column=3, sticky="w", **pad)
             action_combo.bind("<<ComboboxSelected>>", lambda _event, row_vars=vars_for_row: self._on_macro_action_changed(row_vars))
             vars_for_row["action_widget"] = action_combo
-            slot_widgets = {}
-            for offset, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
-                slot_widgets[slot_name] = self._key_picker(self.macro_rows_container, row, 4 + offset, vars_for_row[slot_name], "press", 6)
-            vars_for_row["slot_widgets"] = slot_widgets
-            interval_widget = ttk.Spinbox(self.macro_rows_container, from_=MIN_MACRO_INTERVAL_MS, to=5000, increment=5, textvariable=vars_for_row["interval"], width=8)
-            interval_widget.grid(row=row, column=8, sticky="w", **pad)
-            vars_for_row["interval_widget"] = interval_widget
-            ttk.Button(self.macro_rows_container, text="删除", width=6, command=lambda row_index=index: self.remove_macro_row(row_index)).grid(row=row, column=9, sticky="w", **pad)
+            action_config = ttk.Frame(self.macro_rows_container)
+            action_config.grid(row=row, column=4, sticky="w", **pad)
+            vars_for_row["action_config_frame"] = action_config
+            interval_frame = ttk.Frame(self.macro_rows_container)
+            interval_frame.grid(row=row, column=5, sticky="w", **pad)
+            vars_for_row["interval_frame"] = interval_frame
+            ttk.Button(self.macro_rows_container, text="删除", width=6, command=lambda row_index=index: self.remove_macro_row(row_index)).grid(row=row, column=6, sticky="w", **pad)
             self._update_macro_row_state(vars_for_row)
 
         footer_row = len(self.macro_vars) + 1
         ttk.Button(self.macro_rows_container, text="添加宏", command=self.add_macro_row).grid(row=footer_row, column=0, sticky="w", padx=5, pady=(6, 4))
+        ttk.Label(self.macro_rows_container, textvariable=self.recording_hint_var, foreground="#666666").grid(row=footer_row, column=1, columnspan=5, sticky="w", padx=5, pady=(6, 4))
         if not self.macro_vars:
-            ttk.Label(self.macro_rows_container, text="当前还没有宏，点击“添加宏”开始配置。", foreground="#666666").grid(row=footer_row, column=1, columnspan=8, sticky="w", padx=5, pady=(6, 4))
+            ttk.Label(self.macro_rows_container, text="当前还没有宏，点击“添加宏”开始配置。", foreground="#666666").grid(row=footer_row + 1, column=1, columnspan=5, sticky="w", padx=5, pady=(0, 4))
         if self.toggle_profiles_container is not None:
             self._render_toggle_profile_rows()
 
@@ -1033,6 +1314,39 @@ class ConfigWindow:
         self._render_macro_rows()
         self._fit_to_content()
         self.status_var.set("已删除宏")
+
+    def add_recorded_macro(self, events: list[dict[str, object]]) -> None:
+        recording = normalize_recording(events)
+        if not recording:
+            self.status_var.set("录制结束，但没有捕获到有效动作")
+            self._reveal_window()
+            return
+        index = self._next_blank_macro_index()
+        macro = MacroConfig(
+            enabled=False,
+            name=f"录制宏 {index}",
+            trigger=self._suggest_macro_trigger(),
+            action=ACTION_RECORDED,
+            sequence=["none", "none", "none", "none"],
+            interval_ms=DEFAULT_INTERVAL_MS,
+            id=make_stable_id("macro"),
+            playback_mode=PLAYBACK_ONCE,
+            recording=recording,
+        )
+        self.macro_vars.append(self._new_macro_vars(macro))
+        self._render_macro_rows()
+        self._reveal_window()
+        self._fit_to_content()
+        self.status_var.set(f"已新增录制宏：{recording_summary(recording)}。请修改名称、开关键并勾选启用后保存。")
+
+    def _suggest_macro_trigger(self) -> str:
+        used = {trigger_label_to_id(str(vars_for_row["trigger"].get())) for vars_for_row in self.macro_vars}
+        used.update(optional_trigger_label_to_id(str(profile_vars["trigger"].get())) for profile_vars in self.toggle_profile_vars)
+        used.add(optional_trigger_label_to_id(str(self.recording_trigger_var.get())))
+        for key_id in COMMON_TRIGGER_KEYS:
+            if key_id not in used:
+                return key_id
+        return "f12"
 
     def _new_toggle_profile_vars(self, profile: ToggleProfile) -> dict[str, object]:
         return {
@@ -1067,7 +1381,7 @@ class ConfigWindow:
         for child in self.toggle_profiles_container.winfo_children():
             child.destroy()
 
-        pad = {"padx": 5, "pady": 4}
+        pad = {"padx": 4, "pady": 2}
         headers = ["启用", "快捷键", "控制宏", "操作"]
         for col, header in enumerate(headers):
             ttk.Label(self.toggle_profiles_container, text=header).grid(row=0, column=col, sticky="w", **pad)
@@ -1121,23 +1435,44 @@ class ConfigWindow:
 
     def _on_macro_action_changed(self, vars_for_row: dict[str, object]) -> None:
         self._update_macro_row_state(vars_for_row)
+        self._fit_to_content()
         action = action_label_to_id(str(vars_for_row["action"].get()))
         if action == ACTION_HOLD:
             self.status_var.set("自动按住会同时按住所有非“无”的槽位，间隔不生效")
         elif action == ACTION_PRESS_CYCLE:
             self.status_var.set("循环连按会按槽位顺序短按，间隔越小触发越快")
+        elif action == ACTION_RECORDED:
+            self.status_var.set("录制回放由游戏内快捷键生成；循环执行时，间隔表示两轮回放之间的等待时间")
         else:
             self.status_var.set("当前宏动作已设为无")
 
     def _update_macro_row_state(self, vars_for_row: dict[str, object]) -> None:
         action = action_label_to_id(str(vars_for_row["action"].get()))
-        slots_enabled = action in {ACTION_HOLD, ACTION_PRESS_CYCLE}
-        interval_enabled = action == ACTION_PRESS_CYCLE
-        for widget in dict(vars_for_row.get("slot_widgets", {})).values():
-            self._set_widget_tree_enabled(widget, slots_enabled)
-        interval_widget = vars_for_row.get("interval_widget")
-        if isinstance(interval_widget, tk.Widget):
-            self._set_widget_enabled(interval_widget, interval_enabled)
+        frame = vars_for_row.get("action_config_frame")
+        if not isinstance(frame, tk.Widget):
+            return
+        for child in frame.winfo_children():
+            child.destroy()
+        if action == ACTION_HOLD:
+            for offset, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
+                self._key_picker(frame, 0, offset, vars_for_row[slot_name], "press", 6)
+        elif action == ACTION_PRESS_CYCLE:
+            for offset, slot_name in enumerate(["slot1", "slot2", "slot3", "slot4"]):
+                self._key_picker(frame, 0, offset, vars_for_row[slot_name], "press", 6)
+        elif action == ACTION_RECORDED:
+            ttk.Label(frame, text=f"已录制：{recording_summary(vars_for_row.get('recording'))}").grid(row=0, column=0, sticky="w", padx=(0, 10))
+            ttk.Label(frame, text="回放").grid(row=0, column=1, sticky="w", padx=(0, 3))
+            playback_combo = ttk.Combobox(frame, textvariable=vars_for_row["playback_mode"], values=list(PLAYBACK_MODE_LABELS.values()), state="readonly", width=8)
+            playback_combo.grid(row=0, column=2, sticky="w")
+            playback_combo.bind("<<ComboboxSelected>>", lambda _event, row_vars=vars_for_row: self._on_macro_action_changed(row_vars))
+        else:
+            ttk.Label(frame, text="不执行任何动作", foreground="#777777").grid(row=0, column=0, sticky="w")
+        interval_frame = vars_for_row.get("interval_frame")
+        if isinstance(interval_frame, tk.Widget):
+            for child in interval_frame.winfo_children():
+                child.destroy()
+            if action == ACTION_PRESS_CYCLE or (action == ACTION_RECORDED and playback_mode_label_to_id(str(vars_for_row["playback_mode"].get())) == PLAYBACK_LOOP):
+                ttk.Spinbox(interval_frame, from_=MIN_MACRO_INTERVAL_MS, to=5000, increment=5, textvariable=vars_for_row["interval"], width=7).grid(row=0, column=0, sticky="w")
 
     def _set_widget_tree_enabled(self, widget: tk.Widget, enabled: bool) -> None:
         self._set_widget_enabled(widget, enabled)
@@ -1148,13 +1483,15 @@ class ConfigWindow:
         try:
             if isinstance(widget, ttk.Entry):
                 widget.configure(state="readonly" if enabled else "disabled")
+            elif isinstance(widget, ttk.Combobox):
+                widget.configure(state="readonly" if enabled else "disabled")
             else:
                 widget.configure(state="normal" if enabled else "disabled")
         except tk.TclError:
             return
 
     def _key_picker(self, parent: tk.Widget, row: int, column: int, value_var: tk.StringVar, kind: str, width: int) -> ttk.Frame:
-        pad = {"padx": 5, "pady": 4}
+        pad = {"padx": 3, "pady": 1}
         frame = ttk.Frame(parent)
         frame.grid(row=row, column=column, sticky="w", **pad)
         ttk.Entry(frame, textvariable=value_var, width=width, state="readonly").pack(side="left")
@@ -1204,7 +1541,7 @@ class ConfigWindow:
             self._finish_recording(None)
             return
         for key_id, virtual_key in RECORDABLE_KEYS.items():
-            if self.record_target_kind == "trigger" and key_id == "left":
+            if self.record_target_kind in {"trigger", "optional_trigger"} and key_id == "left":
                 continue
             if is_key_down(virtual_key):
                 self._finish_recording(key_id)
@@ -1270,11 +1607,19 @@ class ConfigWindow:
         self.overlay_x_var.set(config.overlay_x)
         self.overlay_y_var.set(config.overlay_y)
         self.overlay_opacity_var.set(config.overlay_opacity)
+        self.recording_trigger_var.set(optional_trigger_id_to_label(config.recording_trigger))
+        self.recording_countdown_var.set(config.recording_countdown_sec)
+        self.recording_max_seconds_var.set(config.recording_max_seconds)
         self._update_opacity_text()
+        self._update_recording_hint()
         self._fit_to_content()
 
     def _update_opacity_text(self) -> None:
         self.overlay_opacity_text_var.set(f"{int(float(self.overlay_opacity_var.get()) * 100)}%")
+
+    def _update_recording_hint(self) -> None:
+        trigger_text = str(self.recording_trigger_var.get()).strip() or "未设置"
+        self.recording_hint_var.set(f"在游戏中使用 {trigger_text} 录制宏")
 
     def show_advanced_settings(self) -> None:
         if self.advanced_window is not None and self.advanced_window.winfo_exists():
@@ -1325,6 +1670,20 @@ class ConfigWindow:
         ttk.Label(opacity_row, textvariable=self.overlay_opacity_text_var, width=6).grid(row=0, column=1, padx=(8, 0))
         ttk.Label(overlay, text="轮询间隔").grid(row=4, column=0, sticky="w", **pad)
         ttk.Spinbox(overlay, from_=50, to=1000, increment=10, textvariable=self.poll_interval_var, width=10).grid(row=4, column=1, sticky="w", **pad)
+
+        recording = ttk.LabelFrame(main, text="宏录制")
+        recording.pack(fill="x", pady=(0, 8))
+        recording.columnconfigure(1, weight=1)
+        self._help_label(recording, "在游戏窗口内按录制快捷键开始倒计时，再按一次停止。录制完成后会自动新增一条“录制回放”宏并打开配置。").grid(row=0, column=0, columnspan=2, sticky="w", **pad)
+        ttk.Label(recording, text="录制快捷键").grid(row=1, column=0, sticky="w", **pad)
+        self._key_picker(recording, 1, 1, self.recording_trigger_var, "optional_trigger", 8)
+        ttk.Label(recording, text="倒计时/最长时长").grid(row=2, column=0, sticky="w", **pad)
+        recording_limits = ttk.Frame(recording)
+        recording_limits.grid(row=2, column=1, sticky="w", **pad)
+        ttk.Spinbox(recording_limits, from_=0, to=10, increment=1, textvariable=self.recording_countdown_var, width=6).pack(side="left")
+        ttk.Label(recording_limits, text="秒后开始，最多").pack(side="left", padx=(6, 6))
+        ttk.Spinbox(recording_limits, from_=1, to=120, increment=1, textvariable=self.recording_max_seconds_var, width=6).pack(side="left")
+        ttk.Label(recording_limits, text="秒").pack(side="left", padx=(6, 0))
 
         update = ttk.LabelFrame(main, text="版本更新")
         update.pack(fill="x", pady=(0, 8))
@@ -1382,6 +1741,8 @@ class ConfigWindow:
                     sequence=[press_key_label_to_id(str(vars_for_row[name].get())) for name in ["slot1", "slot2", "slot3", "slot4"]],
                     interval_ms=parse_interval_ms(vars_for_row["interval"].get(), macro_name),
                     id=str(vars_for_row["id"]),
+                    playback_mode=playback_mode_label_to_id(str(vars_for_row["playback_mode"].get())),
+                    recording=normalize_recording(vars_for_row.get("recording")),
                 ))
             toggle_profiles: list[ToggleProfile] = []
             for profile_vars in self.toggle_profile_vars:
@@ -1402,6 +1763,9 @@ class ConfigWindow:
                 overlay_x=int(self.overlay_x_var.get()),
                 overlay_y=int(self.overlay_y_var.get()),
                 overlay_opacity=float(self.overlay_opacity_var.get()),
+                recording_trigger=optional_trigger_label_to_id(str(self.recording_trigger_var.get()).strip()),
+                recording_countdown_sec=int(self.recording_countdown_var.get()),
+                recording_max_seconds=int(self.recording_max_seconds_var.get()),
             )
             validate_config(config)
             save_config(self.config_path, config)
@@ -1428,8 +1792,14 @@ class ConfigWindow:
 
     def show(self) -> None:
         self.load_from_engine()
+        self._reveal_window()
+
+    def _reveal_window(self) -> None:
         self.window.deiconify()
         self.window.lift()
+        self.window.attributes("-topmost", True)
+        self.window.after(250, lambda: self.window.attributes("-topmost", False))
+        self.window.after(20, self.window.focus_force)
 
     def hide(self) -> None:
         self.window.withdraw()
@@ -1443,6 +1813,25 @@ def action_label_to_id(label: str) -> str:
 
 def action_id_to_label(action_id: str) -> str:
     return ACTION_LABELS.get(action_id, ACTION_LABELS[ACTION_NONE])
+
+
+def playback_mode_label_to_id(label: str) -> str:
+    for key, value in PLAYBACK_MODE_LABELS.items():
+        if value == label:
+            return key
+    return PLAYBACK_ONCE
+
+
+def playback_mode_id_to_label(mode_id: str) -> str:
+    return PLAYBACK_MODE_LABELS.get(mode_id, PLAYBACK_MODE_LABELS[PLAYBACK_ONCE])
+
+
+def recording_summary(recording: object) -> str:
+    events = normalize_recording(recording if isinstance(recording, list) else None)
+    if not events:
+        return "未录制"
+    duration_ms = int(events[-1].get("at_ms", 0))
+    return f"{len(events)} 个动作 / {duration_ms / 1000:.1f} 秒"
 
 
 def key_text_to_id(text: str, allowed: dict[str, object], fallback: str) -> str:
@@ -1558,11 +1947,11 @@ def make_stable_id(prefix: str) -> str:
 
 def default_macros() -> list[MacroConfig]:
     return [
-        MacroConfig(True, "旋风斩", "xbutton1", ACTION_HOLD, ["right", "none", "none", "none"], 100, make_stable_id("macro")),
-        MacroConfig(True, "呐喊", "xbutton2", ACTION_PRESS_CYCLE, ["1", "none", "none", "none"], 500, make_stable_id("macro")),
-        MacroConfig(True, "交互", "f1", ACTION_PRESS_CYCLE, ["f", "none", "none", "none"], 100, make_stable_id("macro")),
-        MacroConfig(True, "右键连点", "f2", ACTION_PRESS_CYCLE, ["right", "none", "none", "none"], 100, make_stable_id("macro")),
-        MacroConfig(True, "爆发", "middle", ACTION_PRESS_CYCLE, ["2", "3", "none", "none"], 100, make_stable_id("macro")),
+        MacroConfig(True, "交互", "f1", ACTION_PRESS_CYCLE, ["f", "none", "none", "none"], 100, "macro_6cabdbdd74c7", PLAYBACK_ONCE, []),
+        MacroConfig(True, "右键连点", "f2", ACTION_PRESS_CYCLE, ["right", "none", "none", "none"], 100, "macro_795e8f90f19b", PLAYBACK_ONCE, []),
+        MacroConfig(True, "旋风斩", "f3", ACTION_HOLD, ["right", "none", "none", "none"], 100, "macro_d5e130410039", PLAYBACK_ONCE, []),
+        MacroConfig(True, "增益技能", "f4", ACTION_PRESS_CYCLE, ["2", "1", "3", "4"], 100, "macro_639ed922028b", PLAYBACK_ONCE, []),
+        MacroConfig(True, "大招", "f5", ACTION_PRESS_CYCLE, ["left", "none", "none", "none"], 1000, "macro_1ab382a5f373", PLAYBACK_ONCE, []),
     ]
 
 
@@ -1591,9 +1980,14 @@ def default_toggle_profiles(macros: list[MacroConfig]) -> list[ToggleProfile]:
     return [
         ToggleProfile(
             enabled=True,
-            trigger="e",
-            macro_ids=[macro.id for macro in macros[:3]],
-            id=make_stable_id("profile"),
+            trigger="middle",
+            macro_ids=[
+                "macro_6cabdbdd74c7",
+                "macro_d5e130410039",
+                "macro_639ed922028b",
+                "macro_1ab382a5f373",
+            ],
+            id="profile_1c6916323e1f",
         )
     ]
 
@@ -1620,6 +2014,8 @@ def parse_macros(raw: dict[str, object]) -> list[MacroConfig]:
                 sequence=sequence,
                 interval_ms=int(item.get("interval_ms", DEFAULT_INTERVAL_MS)),
                 id=str(item.get("id", "")).strip(),
+                playback_mode=str(item.get("playback_mode", PLAYBACK_ONCE)).strip(),
+                recording=item.get("recording") if isinstance(item.get("recording"), list) else None,
             ))
         return normalize_macros(parsed)
 
@@ -1665,6 +2061,33 @@ def hold_items(macro: MacroConfig) -> list[str]:
     return [item for item in sequence if item != "none"]
 
 
+def normalize_recording(recording: list[dict[str, object]] | None) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    if not isinstance(recording, list):
+        return normalized
+    for event in recording[:MAX_RECORDED_EVENTS]:
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type", "")).strip()
+        key_id = press_key_label_to_id(str(event.get("key", "")))
+        if event_type not in {"key_down", "key_up"} or key_id == "none":
+            continue
+        try:
+            at_ms = max(0, int(event.get("at_ms", 0)))
+        except (TypeError, ValueError):
+            at_ms = 0
+        normalized_event: dict[str, object] = {"type": event_type, "key": key_id, "at_ms": at_ms}
+        if key_id in {"left", "right", "middle"}:
+            try:
+                normalized_event["x"] = int(event["x"])
+                normalized_event["y"] = int(event["y"])
+            except (KeyError, TypeError, ValueError):
+                pass
+        normalized.append(normalized_event)
+    normalized.sort(key=lambda item: int(item.get("at_ms", 0)))
+    return normalized
+
+
 def normalize_macros(macros: list[MacroConfig] | None) -> list[MacroConfig]:
     source = default_macros() if macros is None else list(macros)
     normalized: list[MacroConfig] = []
@@ -1679,6 +2102,8 @@ def normalize_macros(macros: list[MacroConfig] | None) -> list[MacroConfig]:
             sequence=normalize_sequence(macro.sequence),
             interval_ms=max(int(macro.interval_ms), MIN_MACRO_INTERVAL_MS),
             id=str(macro.id).strip() or make_stable_id("macro"),
+            playback_mode=macro.playback_mode if macro.playback_mode in PLAYBACK_MODE_LABELS else PLAYBACK_ONCE,
+            recording=normalize_recording(macro.recording),
         ))
     return normalized
 
@@ -1748,6 +2173,9 @@ def normalize_config(config: Config) -> Config:
         overlay_x=int(config.overlay_x),
         overlay_y=int(config.overlay_y),
         overlay_opacity=float(config.overlay_opacity),
+        recording_trigger=optional_trigger_label_to_id(str(config.recording_trigger)),
+        recording_countdown_sec=max(int(config.recording_countdown_sec), 0),
+        recording_max_seconds=max(int(config.recording_max_seconds), 1),
     )
 
 
@@ -1757,7 +2185,7 @@ def clone_config(config: Config) -> Config:
         window_title_contains=normalized.window_title_contains,
         process_name=normalized.process_name,
         macros=[
-            MacroConfig(m.enabled, m.name, m.trigger, m.action, list(m.sequence), m.interval_ms, m.id)
+            MacroConfig(m.enabled, m.name, m.trigger, m.action, list(m.sequence), m.interval_ms, m.id, m.playback_mode, normalize_recording(m.recording))
             for m in (normalized.macros or [])
         ],
         toggle_profiles=[
@@ -1769,6 +2197,9 @@ def clone_config(config: Config) -> Config:
         overlay_x=normalized.overlay_x,
         overlay_y=normalized.overlay_y,
         overlay_opacity=normalized.overlay_opacity,
+        recording_trigger=normalized.recording_trigger,
+        recording_countdown_sec=normalized.recording_countdown_sec,
+        recording_max_seconds=normalized.recording_max_seconds,
     )
 
 
@@ -1781,6 +2212,51 @@ def press_sequence_item(item: str) -> None:
         click_middle()
     elif item in PRESS_KEYS and isinstance(PRESS_KEYS[item], int):
         tap_key(PRESS_KEYS[item])
+
+
+def play_recorded_event(event: dict[str, object]) -> None:
+    item = press_key_label_to_id(str(event.get("key", "")))
+    is_key_up = str(event.get("type", "")) == "key_up"
+    move_cursor_to_recorded_position(event)
+    if item == "left":
+        send_mouse_input(MOUSEEVENTF_LEFTUP if is_key_up else MOUSEEVENTF_LEFTDOWN)
+    elif item == "right":
+        send_mouse_input(MOUSEEVENTF_RIGHTUP if is_key_up else MOUSEEVENTF_RIGHTDOWN)
+    elif item == "middle":
+        send_mouse_input(MOUSEEVENTF_MIDDLEUP if is_key_up else MOUSEEVENTF_MIDDLEDOWN)
+    elif item in PRESS_KEYS and isinstance(PRESS_KEYS[item], int):
+        send_key_input(PRESS_KEYS[item], KEYEVENTF_KEYUP if is_key_up else 0)
+
+
+def release_recorded_item(item: str) -> None:
+    if item == "left":
+        send_mouse_input(MOUSEEVENTF_LEFTUP)
+    elif item == "right":
+        send_mouse_input(MOUSEEVENTF_RIGHTUP)
+    elif item == "middle":
+        send_mouse_input(MOUSEEVENTF_MIDDLEUP)
+    elif item in PRESS_KEYS and isinstance(PRESS_KEYS[item], int):
+        send_key_input(PRESS_KEYS[item], KEYEVENTF_KEYUP)
+
+
+def move_cursor_to_recorded_position(event: dict[str, object]) -> None:
+    x = event.get("x")
+    y = event.get("y")
+    if x is None or y is None:
+        return
+    try:
+        cursor_x = int(x)
+        cursor_y = int(y)
+    except (TypeError, ValueError):
+        return
+    user32.SetCursorPos(cursor_x, cursor_y)
+
+
+def get_cursor_position() -> tuple[int, int] | None:
+    point = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(point)):
+        return None
+    return point.x, point.y
 
 
 def send_mouse_input(flags: int) -> None:
@@ -1889,7 +2365,10 @@ def load_config(path: Path) -> Config:
         overlay_enabled=bool(raw.get("overlay_enabled", True)),
         overlay_x=int(raw.get("overlay_x", 20)),
         overlay_y=int(raw.get("overlay_y", 20)),
-        overlay_opacity=float(raw.get("overlay_opacity", 0.62)),
+        overlay_opacity=float(raw.get("overlay_opacity", DEFAULT_OVERLAY_OPACITY)),
+        recording_trigger=str(raw.get("recording_trigger", DEFAULT_RECORD_TRIGGER)).strip(),
+        recording_countdown_sec=int(raw.get("recording_countdown_sec", DEFAULT_RECORD_COUNTDOWN_SEC)),
+        recording_max_seconds=int(raw.get("recording_max_seconds", DEFAULT_RECORD_MAX_SECONDS)),
     )
 
     validate_config(config)
@@ -1919,6 +2398,8 @@ def validate_config(config: Config) -> None:
             raise ValueError(f"{macro.name} 的自动按住槽位不能全为“无”。")
         if macro.action == ACTION_PRESS_CYCLE and not [item for item in macro.sequence if item != "none"]:
             raise ValueError(f"{macro.name} 的循环槽位不能全为“无”。")
+        if macro.enabled and macro.action == ACTION_RECORDED and not normalize_recording(macro.recording):
+            raise ValueError(f"{macro.name} 没有录制内容。")
         if macro.enabled and macro.action != ACTION_NONE:
             active_triggers.append((macro.trigger, macro.name))
     seen: dict[str, str] = {}
@@ -1936,15 +2417,23 @@ def validate_config(config: Config) -> None:
         if profile.trigger in seen:
             raise ValueError(f"一键启动配置 {index + 1} 不能和 {seen[profile.trigger]} 使用同一个按键：{trigger_id_to_label(profile.trigger)}。")
         seen[profile.trigger] = f"一键启动配置 {index + 1}"
+    if config.recording_trigger not in OPTIONAL_TRIGGER_KEYS:
+        raise ValueError("录制快捷键无效。")
+    if config.recording_trigger != "none" and config.recording_trigger in seen:
+        raise ValueError(f"宏录制不能和 {seen[config.recording_trigger]} 使用同一个按键：{trigger_id_to_label(config.recording_trigger)}。")
     if config.poll_interval_ms < 50:
         raise ValueError("轮询间隔不能小于 50ms。")
+    if config.recording_countdown_sec < 0:
+        raise ValueError("录制倒计时不能小于 0 秒。")
+    if config.recording_max_seconds < 1:
+        raise ValueError("最长录制时长不能小于 1 秒。")
 
 
 def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def create_tray_icon(command_queue: queue.Queue[str]) -> object | None:
+def create_tray_icon(command_queue: queue.Queue[object]) -> object | None:
     if pystray is None or Image is None or ImageDraw is None:
         return None
 
@@ -1975,8 +2464,8 @@ def create_tray_icon(command_queue: queue.Queue[str]) -> object | None:
 
 
 def run_gui(config: Config, config_path: Path) -> int:
-    command_queue: queue.Queue[str] = queue.Queue()
-    engine = MacroEngine(config)
+    command_queue: queue.Queue[object] = queue.Queue()
+    engine = MacroEngine(config, command_queue)
     engine.start()
 
     root = tk.Tk()
@@ -1994,16 +2483,28 @@ def run_gui(config: Config, config_path: Path) -> int:
         root.destroy()
 
     def tick() -> None:
+        def handle_recording_done(events: list[dict[str, object]]) -> None:
+            try:
+                app.add_recorded_macro(events)
+            except Exception as exc:
+                app.status_var.set(f"添加录制宏失败：{exc}")
+                app._reveal_window()
+
         try:
             while True:
                 command = command_queue.get_nowait()
-                if command == "show":
+                if isinstance(command, dict) and command.get("type") == "recording_done":
+                    root.after(0, lambda events=normalize_recording(command.get("events")): handle_recording_done(events))
+                elif command == "show":
                     app.show()
                 elif command == "quit":
                     quit_all()
                     return
         except queue.Empty:
             pass
+        except Exception as exc:
+            app.status_var.set(f"处理后台命令失败：{exc}")
+            app._reveal_window()
 
         overlay.refresh()
         root.after(120, tick)
