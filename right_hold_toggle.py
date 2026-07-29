@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 import uuid
 import webbrowser
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -52,6 +53,7 @@ def resource_path(relative_path: str) -> Path:
 CONFIG_PATH = app_dir() / "config.json"
 DONATE_IMAGE_PATH = resource_path("assets/donate.jpg")
 APP_ICON_PATH = resource_path("assets/app-icon.png")
+WORM_ROUTE_DIR = resource_path("assets/worm-routes")
 VERSION_PATH = app_dir() / "VERSION"
 BUNDLED_VERSION_PATH = resource_path("VERSION")
 
@@ -326,7 +328,50 @@ DEFAULT_OVERLAY_OPACITY = 0.60
 DEFAULT_RECORD_TRIGGER = "f12"
 DEFAULT_RECORD_COUNTDOWN_SEC = 3
 DEFAULT_RECORD_MAX_SECONDS = 30
+DEFAULT_ROUTE_TRIGGER = "f11"
+DEFAULT_ROUTE_OPACITY = 0.90
 MAX_RECORDED_EVENTS = 500
+
+ROUTE_POSITION_LABELS = {
+    "left": "左侧",
+    "center": "居中",
+    "right": "右侧",
+}
+ROUTE_SIZE_LABELS = {
+    "small": "小",
+    "medium": "中",
+    "large": "大",
+}
+
+
+@dataclass(frozen=True)
+class WormRouteMap:
+    id: str
+    name: str
+
+    @property
+    def image_path(self) -> Path:
+        return WORM_ROUTE_DIR / f"route-{self.id}.webp"
+
+    @property
+    def thumbnail_path(self) -> Path:
+        return WORM_ROUTE_DIR / "thumbnails" / f"thumb-{self.id}.webp"
+
+
+WORM_ROUTE_MAPS = (
+    WormRouteMap("01", "马洛文"),
+    WormRouteMap("03", "图尔杜拉"),
+    WormRouteMap("14", "黑石警戒塔"),
+    WormRouteMap("15", "基兰岱"),
+    WormRouteMap("19", "墨涅斯塔"),
+    WormRouteMap("21", "基奥瓦沙西"),
+    WormRouteMap("25", "废墟祭坛"),
+    WormRouteMap("26", "铁狼营地"),
+    WormRouteMap("28", "吉库尔"),
+    WormRouteMap("32", "维金哈尼"),
+    WormRouteMap("33", "扎宾泽特西"),
+)
+WORM_ROUTE_MAP_BY_ID = {route.id: route for route in WORM_ROUTE_MAPS}
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -441,6 +486,12 @@ class Config:
     recording_trigger: str = DEFAULT_RECORD_TRIGGER
     recording_countdown_sec: int = DEFAULT_RECORD_COUNTDOWN_SEC
     recording_max_seconds: int = DEFAULT_RECORD_MAX_SECONDS
+    route_enabled: bool = True
+    route_trigger: str = DEFAULT_ROUTE_TRIGGER
+    route_position: str = "right"
+    route_size: str = "medium"
+    route_opacity: float = DEFAULT_ROUTE_OPACITY
+    route_last_selected: str = "01"
 
 
 @dataclass(frozen=True)
@@ -510,6 +561,12 @@ class MacroEngine:
             self.playback_state = {}
         self.release_all_inputs()
 
+    def update_route_selection(self, route_id: str) -> Config:
+        with self.lock:
+            if route_id in WORM_ROUTE_MAP_BY_ID:
+                self.config.route_last_selected = route_id
+            return clone_config(self.config)
+
     def snapshot(self) -> Snapshot:
         with self.lock:
             return Snapshot(
@@ -553,6 +610,20 @@ class MacroEngine:
 
                 self._handle_recording_trigger_locked(config, target_active)
                 recording_blocks_macros = self.recording_status in {"countdown", "recording"}
+
+                route_virtual_key = OPTIONAL_TRIGGER_KEYS.get(config.route_trigger)
+                route_down = is_key_down(route_virtual_key) if route_virtual_key is not None else False
+                route_trigger_key = "route:toggle"
+                if (
+                    config.route_enabled
+                    and target_active
+                    and not recording_blocks_macros
+                    and route_down
+                    and not self.last_trigger_down.get(route_trigger_key, False)
+                    and self.event_queue is not None
+                ):
+                    self.event_queue.put({"type": "route_toggle"})
+                self.last_trigger_down[route_trigger_key] = route_down
 
                 for profile in config.toggle_profiles or []:
                     if not profile.enabled:
@@ -1104,6 +1175,325 @@ class OverlayWindow:
     def _height_for_rows(self, row_count: int) -> int:
         return 30 + max(row_count, 1) * 22 + 8
 
+
+class WormRouteOverlay:
+    def __init__(
+        self,
+        root: tk.Tk,
+        engine: MacroEngine,
+        selection_callback: Callable[[str], None] | None = None,
+    ) -> None:
+        self.root = root
+        self.engine = engine
+        self.selection_callback = selection_callback
+        self.mode = "hidden"
+        self.return_mode = "hidden"
+        self.selected_id = engine.snapshot().config.route_last_selected
+        if self.selected_id not in WORM_ROUTE_MAP_BY_ID:
+            self.selected_id = WORM_ROUTE_MAPS[0].id
+
+        self.selector = tk.Toplevel(root)
+        self.selector.withdraw()
+        self.selector.overrideredirect(True)
+        self.selector.attributes("-topmost", True)
+        self.selector.configure(bg="#111111")
+        self.selector_canvas = tk.Canvas(self.selector, bg="#111111", highlightthickness=0, bd=0)
+        self.selector_canvas.pack(fill="both", expand=True)
+        self.selector_canvas.bind("<Button-1>", self._on_selector_click)
+
+        self.map_window = tk.Toplevel(root)
+        self.map_window.withdraw()
+        self.map_window.overrideredirect(True)
+        self.map_window.attributes("-topmost", True)
+        self.map_window.configure(bg="#111111")
+        self.map_canvas = tk.Canvas(self.map_window, bg="#111111", highlightthickness=0, bd=0)
+        self.map_canvas.pack(fill="both", expand=True)
+
+        self._selector_style_applied = False
+        self._map_style_applied = False
+        self._selector_hitboxes: list[tuple[int, int, int, int, str]] = []
+        self._selector_images: list[object] = []
+        self._selector_signature: tuple[object, ...] | None = None
+        self._map_image: object | None = None
+        self._map_signature: tuple[object, ...] | None = None
+
+    def toggle_selector(self) -> None:
+        snapshot = self.engine.snapshot()
+        if not snapshot.config.route_enabled or not snapshot.target_active:
+            return
+        if self.mode == "selector":
+            self.mode = self.return_mode
+        else:
+            self.return_mode = self.mode if self.mode == "map" else "hidden"
+            self.mode = "selector"
+        self.refresh()
+
+    def refresh(self) -> None:
+        snapshot = self.engine.snapshot()
+        config = snapshot.config
+        if config.route_last_selected in WORM_ROUTE_MAP_BY_ID and config.route_last_selected != self.selected_id:
+            self.selected_id = config.route_last_selected
+            self._selector_signature = None
+            self._map_signature = None
+
+        if not config.route_enabled:
+            self.mode = "hidden"
+            self.return_mode = "hidden"
+            self._withdraw_all()
+            return
+        if not snapshot.target_active:
+            if self.mode == "selector":
+                self.mode = self.return_mode
+            self._withdraw_all()
+            return
+
+        rect = self._target_rect()
+        if rect is None:
+            self._withdraw_all()
+            return
+        if self.mode == "selector":
+            self.map_window.withdraw()
+            self._show_selector(rect, config)
+        elif self.mode == "map":
+            self.selector.withdraw()
+            self._show_map(rect, config)
+        else:
+            self._withdraw_all()
+
+    def _target_rect(self) -> wintypes.RECT | None:
+        hwnd = user32.GetForegroundWindow()
+        rect = wintypes.RECT()
+        if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+        return rect
+
+    def _show_selector(self, rect: wintypes.RECT, config: Config) -> None:
+        available_width = max(rect.right - rect.left, 800)
+        available_height = max(rect.bottom - rect.top, 600)
+        width = min(1120, max(760, available_width - 80))
+        margin = 16
+        gap = 10
+        header_height = 46
+        tile_width = (width - margin * 2 - gap * 3) // 4
+        image_height = min(158, max(92, int(tile_width * 0.58)))
+        tile_height = image_height + 34
+        height = header_height + margin + tile_height * 3 + gap * 2 + margin
+        if height > available_height - 50:
+            image_height = max(72, image_height - (height - available_height + 50) // 3)
+            tile_height = image_height + 32
+            height = header_height + margin + tile_height * 3 + gap * 2 + margin
+
+        x = rect.left + (available_width - width) // 2
+        y = rect.top + max(20, (available_height - height) // 2)
+        trigger_text = trigger_id_to_label(config.route_trigger)
+        signature = (width, height, tile_width, image_height, self.selected_id, trigger_text)
+        if signature != self._selector_signature:
+            self._draw_selector(width, height, tile_width, image_height, margin, gap, header_height, trigger_text)
+            self._selector_signature = signature
+        self.selector.geometry(f"{width}x{height}+{x}+{y}")
+        if self.selector.state() == "withdrawn":
+            self.selector.deiconify()
+            self._apply_window_style(self.selector, transparent=False)
+        self.selector.attributes("-topmost", True)
+
+    def _draw_selector(
+        self,
+        width: int,
+        height: int,
+        tile_width: int,
+        image_height: int,
+        margin: int,
+        gap: int,
+        header_height: int,
+        trigger_text: str,
+    ) -> None:
+        canvas = self.selector_canvas
+        canvas.configure(width=width, height=height)
+        canvas.delete("all")
+        canvas.create_rectangle(0, 0, width, height, fill="#111111", outline="#4b5563")
+        canvas.create_text(
+            margin,
+            14,
+            text="地狱蠕虫线路图",
+            fill="#f4f4f5",
+            font=("Microsoft YaHei UI", 13, "bold"),
+            anchor="nw",
+        )
+        canvas.create_text(
+            width - margin,
+            16,
+            text=f"选择地区 · {trigger_text} 返回",
+            fill="#a1a1aa",
+            font=("Microsoft YaHei UI", 9),
+            anchor="ne",
+        )
+        self._selector_hitboxes = []
+        self._selector_images = []
+        entries: list[WormRouteMap | None] = [*WORM_ROUTE_MAPS, None]
+        for index, route in enumerate(entries):
+            row, column = divmod(index, 4)
+            left = margin + column * (tile_width + gap)
+            top = header_height + margin + row * (image_height + 34 + gap)
+            right = left + tile_width
+            bottom = top + image_height + 34
+            route_id = route.id if route is not None else "close"
+            self._selector_hitboxes.append((left, top, right, bottom, route_id))
+            selected = route is not None and route.id == self.selected_id
+            fill = "#1f2937" if selected else "#18181b"
+            outline = "#f59e0b" if selected else "#3f3f46"
+            canvas.create_rectangle(left, top, right, bottom, fill=fill, outline=outline, width=2 if selected else 1)
+            if route is None:
+                center_x = (left + right) // 2
+                center_y = top + image_height // 2
+                canvas.create_oval(center_x - 22, center_y - 22, center_x + 22, center_y + 22, outline="#71717a", width=2)
+                canvas.create_line(center_x - 10, center_y - 10, center_x + 10, center_y + 10, fill="#a1a1aa", width=3)
+                canvas.create_line(center_x + 10, center_y - 10, center_x - 10, center_y + 10, fill="#a1a1aa", width=3)
+                label = "关闭线路图"
+            else:
+                photo = self._load_photo(route.thumbnail_path, tile_width - 8, image_height - 8)
+                if photo is not None:
+                    self._selector_images.append(photo)
+                    canvas.create_image((left + right) // 2, top + image_height // 2, image=photo, anchor="center")
+                label = f"{route.id}  {route.name}"
+            canvas.create_text(
+                (left + right) // 2,
+                bottom - 17,
+                text=label,
+                fill="#fafafa" if selected else "#d4d4d8",
+                font=("Microsoft YaHei UI", 9, "bold" if selected else "normal"),
+                anchor="center",
+            )
+        canvas.update_idletasks()
+
+    def _show_map(self, rect: wintypes.RECT, config: Config) -> None:
+        route = WORM_ROUTE_MAP_BY_ID.get(self.selected_id)
+        if route is None or not route.image_path.exists():
+            self.mode = "hidden"
+            self.map_window.withdraw()
+            return
+        available_width = max(rect.right - rect.left, 800)
+        available_height = max(rect.bottom - rect.top, 600)
+        width_ratio = {"small": 0.34, "medium": 0.46, "large": 0.60}.get(config.route_size, 0.46)
+        height_ratio = {"small": 0.62, "medium": 0.76, "large": 0.88}.get(config.route_size, 0.76)
+        max_image_width = max(360, int(available_width * width_ratio))
+        max_image_height = max(320, int(available_height * height_ratio) - 34)
+        trigger_text = trigger_id_to_label(config.route_trigger)
+        signature = (route.id, max_image_width, max_image_height, trigger_text)
+        if signature != self._map_signature:
+            photo = self._load_photo(route.image_path, max_image_width, max_image_height)
+            if photo is None:
+                self.mode = "hidden"
+                self.map_window.withdraw()
+                return
+            self._map_image = photo
+            self._map_signature = signature
+            width = photo.width()
+            height = photo.height() + 34
+            self.map_canvas.configure(width=width, height=height)
+            self.map_canvas.delete("all")
+            self.map_canvas.create_rectangle(0, 0, width, 34, fill="#111111", outline="")
+            self.map_canvas.create_text(
+                12,
+                9,
+                text=f"地狱蠕虫路线 · {route.name}",
+                fill="#f4f4f5",
+                font=("Microsoft YaHei UI", 10, "bold"),
+                anchor="nw",
+            )
+            self.map_canvas.create_text(
+                width - 12,
+                10,
+                text=f"{trigger_text} 切换",
+                fill="#a1a1aa",
+                font=("Microsoft YaHei UI", 8),
+                anchor="ne",
+            )
+            self.map_canvas.create_image(0, 34, image=photo, anchor="nw")
+            self.map_canvas.create_rectangle(0, 0, width - 1, height - 1, outline="#52525b")
+            self.map_canvas.update_idletasks()
+        if self._map_image is None:
+            return
+        width = self._map_image.width()
+        height = self._map_image.height() + 34
+        position = config.route_position
+        if position == "left":
+            x = rect.left + 24
+        elif position == "center":
+            x = rect.left + (available_width - width) // 2
+        else:
+            x = rect.right - width - 24
+        y = rect.top + max(20, (available_height - height) // 2)
+        self.map_window.geometry(f"{width}x{height}+{x}+{y}")
+        self.map_window.attributes("-alpha", clamp(config.route_opacity, 0.4, 1.0))
+        if self.map_window.state() == "withdrawn":
+            self.map_window.deiconify()
+            self._apply_window_style(self.map_window, transparent=True)
+        self.map_window.attributes("-topmost", True)
+
+    def _on_selector_click(self, event: tk.Event) -> None:
+        for left, top, right, bottom, route_id in self._selector_hitboxes:
+            if left <= event.x <= right and top <= event.y <= bottom:
+                if route_id == "close":
+                    self.mode = "hidden"
+                    self.return_mode = "hidden"
+                elif route_id in WORM_ROUTE_MAP_BY_ID:
+                    self.selected_id = route_id
+                    self.mode = "map"
+                    self.return_mode = "map"
+                    self._selector_signature = None
+                    self._map_signature = None
+                    if self.selection_callback is not None:
+                        self.selection_callback(route_id)
+                self.refresh()
+                return
+
+    def _load_photo(self, path: Path, max_width: int, max_height: int) -> object | None:
+        if Image is None or ImageTk is None or not path.exists():
+            return None
+        try:
+            with Image.open(path) as source:
+                image = source.convert("RGB")
+                image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+                return ImageTk.PhotoImage(image)
+        except Exception:
+            return None
+
+    def _apply_window_style(self, window: tk.Toplevel, transparent: bool) -> None:
+        if window is self.selector and self._selector_style_applied:
+            return
+        if window is self.map_window and self._map_style_applied:
+            return
+        try:
+            window.update_idletasks()
+            hwnd = window.winfo_id()
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            style |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+            if transparent:
+                style |= WS_EX_TRANSPARENT
+            else:
+                style &= ~WS_EX_TRANSPARENT
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+            user32.SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+            if window is self.selector:
+                self._selector_style_applied = True
+            else:
+                self._map_style_applied = True
+        except tk.TclError:
+            pass
+
+    def _withdraw_all(self) -> None:
+        self.selector.withdraw()
+        self.map_window.withdraw()
+
+
 class ConfigWindow:
     def __init__(self, root: tk.Tk, engine: MacroEngine, command_queue: queue.Queue[object], config_path: Path) -> None:
         self.root = root
@@ -1128,6 +1518,12 @@ class ConfigWindow:
         self.recording_countdown_var = tk.IntVar()
         self.recording_max_seconds_var = tk.IntVar()
         self.recording_hint_var = tk.StringVar()
+        self.route_enabled_var = tk.BooleanVar()
+        self.route_trigger_var = tk.StringVar()
+        self.route_position_var = tk.StringVar()
+        self.route_size_var = tk.StringVar()
+        self.route_opacity_var = tk.DoubleVar()
+        self.route_opacity_text_var = tk.StringVar()
         self.status_var = tk.StringVar()
         self.version_status_var = tk.StringVar(value=f"当前版本：v{APP_VERSION}")
         self.latest_release_url = GITHUB_RELEASES_URL
@@ -1144,6 +1540,7 @@ class ConfigWindow:
         self._build()
         self.load_from_engine()
         self.overlay_opacity_var.trace_add("write", lambda *_args: self._update_opacity_text())
+        self.route_opacity_var.trace_add("write", lambda *_args: self._update_route_opacity_text())
         self.recording_trigger_var.trace_add("write", lambda *_args: self._update_recording_hint())
         self._fit_to_content()
 
@@ -1610,12 +2007,21 @@ class ConfigWindow:
         self.recording_trigger_var.set(optional_trigger_id_to_label(config.recording_trigger))
         self.recording_countdown_var.set(config.recording_countdown_sec)
         self.recording_max_seconds_var.set(config.recording_max_seconds)
+        self.route_enabled_var.set(config.route_enabled)
+        self.route_trigger_var.set(trigger_id_to_label(config.route_trigger))
+        self.route_position_var.set(ROUTE_POSITION_LABELS.get(config.route_position, "右侧"))
+        self.route_size_var.set(ROUTE_SIZE_LABELS.get(config.route_size, "中"))
+        self.route_opacity_var.set(config.route_opacity)
         self._update_opacity_text()
+        self._update_route_opacity_text()
         self._update_recording_hint()
         self._fit_to_content()
 
     def _update_opacity_text(self) -> None:
         self.overlay_opacity_text_var.set(f"{int(float(self.overlay_opacity_var.get()) * 100)}%")
+
+    def _update_route_opacity_text(self) -> None:
+        self.route_opacity_text_var.set(f"{int(float(self.route_opacity_var.get()) * 100)}%")
 
     def _update_recording_hint(self) -> None:
         trigger_text = str(self.recording_trigger_var.get()).strip() or "未设置"
@@ -1670,6 +2076,25 @@ class ConfigWindow:
         ttk.Label(opacity_row, textvariable=self.overlay_opacity_text_var, width=6).grid(row=0, column=1, padx=(8, 0))
         ttk.Label(overlay, text="轮询间隔").grid(row=4, column=0, sticky="w", **pad)
         ttk.Spinbox(overlay, from_=50, to=1000, increment=10, textvariable=self.poll_interval_var, width=10).grid(row=4, column=1, sticky="w", **pad)
+
+        routes = ttk.LabelFrame(main, text="地狱蠕虫线路图")
+        routes.pack(fill="x", pady=(0, 8))
+        routes.columnconfigure(0, weight=1)
+        self._help_label(routes, "在暗黑4窗口内按快捷键打开宫格选择器。选择地图后会显示鼠标穿透的线路图，再按快捷键可切换地区。").grid(row=0, column=0, sticky="w", **pad)
+        route_options = ttk.Frame(routes)
+        route_options.grid(row=1, column=0, sticky="ew", padx=5, pady=(2, 6))
+        ttk.Checkbutton(route_options, text="启用", variable=self.route_enabled_var).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(route_options, text="快捷键").grid(row=0, column=1, sticky="w")
+        self._key_picker(route_options, 0, 2, self.route_trigger_var, "trigger", 7)
+        ttk.Label(route_options, text="位置").grid(row=0, column=3, sticky="w", padx=(12, 4))
+        ttk.Combobox(route_options, textvariable=self.route_position_var, values=list(ROUTE_POSITION_LABELS.values()), state="readonly", width=6).grid(row=0, column=4, sticky="w")
+        ttk.Label(route_options, text="大小").grid(row=0, column=5, sticky="w", padx=(12, 4))
+        ttk.Combobox(route_options, textvariable=self.route_size_var, values=list(ROUTE_SIZE_LABELS.values()), state="readonly", width=4).grid(row=0, column=6, sticky="w")
+        ttk.Label(route_options, text="透明度").grid(row=0, column=7, sticky="w", padx=(12, 4))
+        route_opacity = ttk.Frame(route_options)
+        route_opacity.grid(row=0, column=8, sticky="w")
+        ttk.Scale(route_opacity, from_=0.4, to=1.0, variable=self.route_opacity_var, orient="horizontal", length=110).pack(side="left")
+        ttk.Label(route_opacity, textvariable=self.route_opacity_text_var, width=5).pack(side="left", padx=(5, 0))
 
         recording = ttk.LabelFrame(main, text="宏录制")
         recording.pack(fill="x", pady=(0, 8))
@@ -1766,6 +2191,12 @@ class ConfigWindow:
                 recording_trigger=optional_trigger_label_to_id(str(self.recording_trigger_var.get()).strip()),
                 recording_countdown_sec=int(self.recording_countdown_var.get()),
                 recording_max_seconds=int(self.recording_max_seconds_var.get()),
+                route_enabled=bool(self.route_enabled_var.get()),
+                route_trigger=trigger_label_to_id(str(self.route_trigger_var.get()).strip()),
+                route_position=next((key for key, label in ROUTE_POSITION_LABELS.items() if label == self.route_position_var.get()), "right"),
+                route_size=next((key for key, label in ROUTE_SIZE_LABELS.items() if label == self.route_size_var.get()), "medium"),
+                route_opacity=float(self.route_opacity_var.get()),
+                route_last_selected=self.engine.snapshot().config.route_last_selected,
             )
             validate_config(config)
             save_config(self.config_path, config)
@@ -2176,6 +2607,12 @@ def normalize_config(config: Config) -> Config:
         recording_trigger=optional_trigger_label_to_id(str(config.recording_trigger)),
         recording_countdown_sec=max(int(config.recording_countdown_sec), 0),
         recording_max_seconds=max(int(config.recording_max_seconds), 1),
+        route_enabled=bool(config.route_enabled),
+        route_trigger=trigger_label_to_id(str(config.route_trigger)),
+        route_position=str(config.route_position) if str(config.route_position) in ROUTE_POSITION_LABELS else "right",
+        route_size=str(config.route_size) if str(config.route_size) in ROUTE_SIZE_LABELS else "medium",
+        route_opacity=clamp(float(config.route_opacity), 0.4, 1.0),
+        route_last_selected=str(config.route_last_selected) if str(config.route_last_selected) in WORM_ROUTE_MAP_BY_ID else WORM_ROUTE_MAPS[0].id,
     )
 
 
@@ -2200,6 +2637,12 @@ def clone_config(config: Config) -> Config:
         recording_trigger=normalized.recording_trigger,
         recording_countdown_sec=normalized.recording_countdown_sec,
         recording_max_seconds=normalized.recording_max_seconds,
+        route_enabled=normalized.route_enabled,
+        route_trigger=normalized.route_trigger,
+        route_position=normalized.route_position,
+        route_size=normalized.route_size,
+        route_opacity=normalized.route_opacity,
+        route_last_selected=normalized.route_last_selected,
     )
 
 
@@ -2369,6 +2812,12 @@ def load_config(path: Path) -> Config:
         recording_trigger=str(raw.get("recording_trigger", DEFAULT_RECORD_TRIGGER)).strip(),
         recording_countdown_sec=int(raw.get("recording_countdown_sec", DEFAULT_RECORD_COUNTDOWN_SEC)),
         recording_max_seconds=int(raw.get("recording_max_seconds", DEFAULT_RECORD_MAX_SECONDS)),
+        route_enabled=bool(raw.get("route_enabled", True)),
+        route_trigger=str(raw.get("route_trigger", DEFAULT_ROUTE_TRIGGER)).strip(),
+        route_position=str(raw.get("route_position", "right")).strip(),
+        route_size=str(raw.get("route_size", "medium")).strip(),
+        route_opacity=float(raw.get("route_opacity", DEFAULT_ROUTE_OPACITY)),
+        route_last_selected=str(raw.get("route_last_selected", WORM_ROUTE_MAPS[0].id)).strip(),
     )
 
     validate_config(config)
@@ -2421,6 +2870,18 @@ def validate_config(config: Config) -> None:
         raise ValueError("录制快捷键无效。")
     if config.recording_trigger != "none" and config.recording_trigger in seen:
         raise ValueError(f"宏录制不能和 {seen[config.recording_trigger]} 使用同一个按键：{trigger_id_to_label(config.recording_trigger)}。")
+    if config.route_trigger not in TRIGGER_KEYS:
+        raise ValueError("线路图快捷键无效。")
+    if config.route_enabled and config.route_trigger in seen:
+        raise ValueError(f"线路图不能和 {seen[config.route_trigger]} 使用同一个按键：{trigger_id_to_label(config.route_trigger)}。")
+    if config.route_enabled and config.route_trigger == config.recording_trigger:
+        raise ValueError(f"线路图不能和宏录制使用同一个按键：{trigger_id_to_label(config.route_trigger)}。")
+    if config.route_position not in ROUTE_POSITION_LABELS:
+        raise ValueError("线路图位置无效。")
+    if config.route_size not in ROUTE_SIZE_LABELS:
+        raise ValueError("线路图大小无效。")
+    if not 0.4 <= config.route_opacity <= 1.0:
+        raise ValueError("线路图透明度必须在 40% 到 100% 之间。")
     if config.poll_interval_ms < 50:
         raise ValueError("轮询间隔不能小于 50ms。")
     if config.recording_countdown_sec < 0:
@@ -2472,6 +2933,15 @@ def run_gui(config: Config, config_path: Path) -> int:
     app = ConfigWindow(root, engine, command_queue, config_path)
     overlay = OverlayWindow(root, engine)
 
+    def persist_route_selection(route_id: str) -> None:
+        try:
+            updated_config = engine.update_route_selection(route_id)
+            save_config(config_path, updated_config)
+        except Exception as exc:
+            app.status_var.set(f"保存线路图选择失败：{exc}")
+
+    route_overlay = WormRouteOverlay(root, engine, persist_route_selection)
+
     tray_icon = create_tray_icon(command_queue)
     if tray_icon:
         threading.Thread(target=tray_icon.run, name="tray-icon", daemon=True).start()
@@ -2495,6 +2965,8 @@ def run_gui(config: Config, config_path: Path) -> int:
                 command = command_queue.get_nowait()
                 if isinstance(command, dict) and command.get("type") == "recording_done":
                     root.after(0, lambda events=normalize_recording(command.get("events")): handle_recording_done(events))
+                elif isinstance(command, dict) and command.get("type") == "route_toggle":
+                    route_overlay.toggle_selector()
                 elif command == "show":
                     app.show()
                 elif command == "quit":
@@ -2507,6 +2979,7 @@ def run_gui(config: Config, config_path: Path) -> int:
             app._reveal_window()
 
         overlay.refresh()
+        route_overlay.refresh()
         root.after(120, tick)
 
     def handle_stop(_signum: int, _frame: object) -> None:

@@ -103,5 +103,11 @@
   "overlay_opacity": 0.6,
   "recording_trigger": "f12",
   "recording_countdown_sec": 3,
-  "recording_max_seconds": 30
+  "recording_max_seconds": 30,
+  "route_enabled": true,
+  "route_trigger": "f11",
+  "route_position": "right",
+  "route_size": "medium",
+  "route_opacity": 0.9,
+  "route_last_selected": "01"
 }
