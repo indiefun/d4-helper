@@ -33,6 +33,9 @@ jobs:
       - name: Syntax check
         run: python -m py_compile right_hold_toggle.py
 
+      - name: Input safety tests
+        run: python -m unittest discover -s tests -v
+
       - name: Read version
         id: version
         shell: pwsh
