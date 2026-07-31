@@ -513,6 +513,7 @@ class Snapshot:
     config: Config
     foreground_title: str
     foreground_process: str
+    target_window_rect: tuple[int, int, int, int] | None = None
     recording_status: str = "idle"
     recording_trigger: str = DEFAULT_RECORD_TRIGGER
     recording_countdown_remaining: int = 0
@@ -543,6 +544,7 @@ class MacroEngine:
         self.foreground_process = ""
         self.foreground_hwnd = 0
         self.foreground_metadata_at = 0.0
+        self.target_window_rect: tuple[int, int, int, int] | None = None
         self.overlay_layout_active = False
         self.recording_status = "idle"
         self.recording_countdown_until = 0.0
@@ -610,6 +612,7 @@ class MacroEngine:
                 config=clone_config(self.config),
                 foreground_title=self.foreground_title,
                 foreground_process=self.foreground_process,
+                target_window_rect=self.target_window_rect,
                 recording_status=self.recording_status,
                 recording_trigger=self.config.recording_trigger,
                 recording_countdown_remaining=max(0, int(self.recording_countdown_until - time.monotonic() + 0.99)) if self.recording_status == "countdown" else 0,
@@ -639,6 +642,7 @@ class MacroEngine:
 
             hwnd, title, process = self._read_foreground_window()
             target_active = foreground_matches_values(config, title, process)
+            target_rect = get_window_rect(hwnd) if target_active else None
 
             release_inputs = False
             special_event: str | None = None
@@ -650,6 +654,8 @@ class MacroEngine:
                 self.target_active = target_active
                 self.foreground_title = title
                 self.foreground_process = process
+                if target_active and target_rect is not None:
+                    self.target_window_rect = rect_to_tuple(target_rect)
 
                 target_changed = target_active != was_target_active
                 stale_tracked_inputs = not self.active_macros and self._has_tracked_inputs()
@@ -1179,6 +1185,7 @@ class OverlayWindow:
         self._dragging = False
         self._drag_offset = (0, 0)
         self._game_rect: wintypes.RECT | None = None
+        self._drag_game_rect: wintypes.RECT | None = None
 
         self.canvas = tk.Canvas(
             self.window,
@@ -1196,6 +1203,7 @@ class OverlayWindow:
     def set_layout_mode(self, enabled: bool) -> None:
         self.layout_mode = bool(enabled)
         self._dragging = False
+        self._drag_game_rect = None
         self.canvas.configure(cursor="fleur" if self.layout_mode else "")
         self._last_geometry = ""
         self._apply_window_style(transparent=not self.layout_mode, force=True)
@@ -1217,9 +1225,9 @@ class OverlayWindow:
         self._draw(snapshot, visible_macros, total_count)
         self.window.attributes("-alpha", clamp(snapshot.config.overlay_opacity, 0.2, 1.0))
 
-        rect = get_foreground_window_rect() if snapshot.target_active else self._game_rect
-        if snapshot.target_active:
-            self._game_rect = rect
+        rect = rect_from_tuple(snapshot.target_window_rect) or self._game_rect
+        if snapshot.target_window_rect is not None:
+            self._game_rect = copy_window_rect(rect)
         if rect is not None:
             x = rect.left + snapshot.config.overlay_x
             y = rect.top + snapshot.config.overlay_y
@@ -1328,6 +1336,7 @@ class OverlayWindow:
             return
         self._dragging = True
         self._drag_offset = (int(event.x), int(event.y))
+        self._drag_game_rect = copy_window_rect(self._game_rect)
 
     def _on_drag_motion(self, event: tk.Event) -> None:
         if not self.layout_mode or not self._dragging:
@@ -1343,9 +1352,11 @@ class OverlayWindow:
         if not self.layout_mode or not self._dragging:
             return
         self._dragging = False
-        rect = self._game_rect or get_foreground_window_rect()
+        rect = self._drag_game_rect or self._game_rect
+        self._drag_game_rect = None
         if rect is None:
             return
+        self.window.update_idletasks()
         relative_x = int(clamp(self.window.winfo_x() - rect.left, -5000, 5000))
         relative_y = int(clamp(self.window.winfo_y() - rect.top, -5000, 5000))
         if self.position_callback is not None:
@@ -1448,6 +1459,7 @@ class WormRouteOverlay:
         self._dragging = False
         self._drag_offset = (0, 0)
         self._game_rect: wintypes.RECT | None = None
+        self._drag_game_rect: wintypes.RECT | None = None
         self.selected_id = engine.snapshot().config.route_last_selected
         if self.selected_id not in WORM_ROUTE_MAP_BY_ID:
             self.selected_id = WORM_ROUTE_MAPS[0].id
@@ -1486,6 +1498,7 @@ class WormRouteOverlay:
             return
         self.layout_mode = enabled
         self._dragging = False
+        self._drag_game_rect = None
         if enabled:
             self._layout_return_mode = self.return_mode if self.mode == "selector" else self.mode
             self.mode = "map"
@@ -1531,10 +1544,12 @@ class WormRouteOverlay:
             self._withdraw_all()
             return
 
-        rect = self._target_rect() if snapshot.target_active else self._game_rect
+        rect = rect_from_tuple(snapshot.target_window_rect) or self._game_rect
         if rect is None:
             self._withdraw_all()
             return
+        if snapshot.target_window_rect is not None:
+            self._game_rect = copy_window_rect(rect)
         if self.mode == "selector":
             self.map_window.withdraw()
             self._show_selector(rect, config)
@@ -1543,9 +1558,6 @@ class WormRouteOverlay:
             self._show_map(rect, config)
         else:
             self._withdraw_all()
-
-    def _target_rect(self) -> wintypes.RECT | None:
-        return get_foreground_window_rect()
 
     def _show_selector(self, rect: wintypes.RECT, config: Config) -> None:
         available_width = max(rect.right - rect.left, 800)
@@ -1736,6 +1748,7 @@ class WormRouteOverlay:
             return
         self._dragging = True
         self._drag_offset = (int(event.x), int(event.y))
+        self._drag_game_rect = copy_window_rect(self._game_rect)
 
     def _on_drag_motion(self, event: tk.Event) -> None:
         if not self.layout_mode or not self._dragging:
@@ -1751,9 +1764,11 @@ class WormRouteOverlay:
         if not self.layout_mode or not self._dragging:
             return
         self._dragging = False
-        rect = self._game_rect or get_foreground_window_rect()
+        rect = self._drag_game_rect or self._game_rect
+        self._drag_game_rect = None
         if rect is None:
             return
+        self.map_window.update_idletasks()
         relative_x = int(clamp(self.map_window.winfo_x() - rect.left, -5000, 5000))
         relative_y = int(clamp(self.map_window.winfo_y() - rect.top, -5000, 5000))
         if self.position_callback is not None:
@@ -3374,12 +3389,25 @@ def clamp_to_virtual_desktop(x: int, y: int, width: int, height: int, visible: i
     return int(clamp(int(x), min_x, max_x)), int(clamp(int(y), min_y, max_y))
 
 
-def get_foreground_window_rect() -> wintypes.RECT | None:
-    hwnd = user32.GetForegroundWindow()
+def get_window_rect(hwnd: int) -> wintypes.RECT | None:
     rect = wintypes.RECT()
     if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
         return None
     return rect
+
+
+def rect_to_tuple(rect: wintypes.RECT) -> tuple[int, int, int, int]:
+    return int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
+
+
+def rect_from_tuple(bounds: tuple[int, int, int, int] | None) -> wintypes.RECT | None:
+    if bounds is None:
+        return None
+    return wintypes.RECT(*[int(value) for value in bounds])
+
+
+def copy_window_rect(rect: wintypes.RECT | None) -> wintypes.RECT | None:
+    return rect_from_tuple(rect_to_tuple(rect)) if rect is not None else None
 
 
 def root_window_handle(hwnd: int) -> int:
