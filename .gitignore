@@ -7,6 +7,13 @@ __pycache__/
 build/
 dist/
 *.spec
+native/*.dll
+native/*.lib
+native/*.exp
+native/*.obj
+/fast_input_kernel.obj
+/fast_input_kernel.lib
+/fast_input_kernel.exp
 
 # Local logs
 *.log
@@ -16,4 +23,3 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
-

@@ -330,7 +330,7 @@ RECORDABLE_KEYS = {
 }
 RECORD_CANCEL_KEY = 0x1B
 DEFAULT_INTERVAL_MS = 100
-MIN_MACRO_INTERVAL_MS = 25
+MIN_MACRO_INTERVAL_MS = 1
 DEFAULT_POLL_INTERVAL_MS = 50
 DEFAULT_OVERLAY_OPACITY = 0.60
 DEFAULT_RECORD_TRIGGER = "f12"
@@ -414,6 +414,17 @@ class INPUT(ctypes.Structure):
     ]
 
 
+class FAST_EVENT(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("key", ctypes.c_int),
+        ("at_ms", ctypes.c_int),
+        ("x", ctypes.c_int),
+        ("y", ctypes.c_int),
+        ("has_pos", ctypes.c_int),
+    ]
+
+
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 user32.GetAncestor.restype = wintypes.HWND
@@ -459,6 +470,180 @@ kernel32.QueryFullProcessImageNameW.argtypes = [
 kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 kernel32.CloseHandle.restype = wintypes.BOOL
+
+
+def _native_item_code(item: str) -> int:
+    if item == "left":
+        return 1
+    if item == "right":
+        return 2
+    if item == "middle":
+        return 3
+    virtual_key = PRESS_KEYS.get(item)
+    if isinstance(virtual_key, int):
+        return 0x100 + virtual_key
+    return 0
+
+
+class FastInputKernel:
+    """Optional native scheduler used for sub-10ms macro timing."""
+
+    def __init__(self) -> None:
+        self.dll: ctypes.CDLL | None = None
+        self.handle: ctypes.c_void_p | None = None
+        self.slots: dict[str, int] = {}
+        self.target_active = False
+        self.supported = True
+        candidates = (
+            resource_path("fast_input_kernel.dll"),
+            app_dir() / "fast_input_kernel.dll",
+            app_dir() / "native" / "fast_input_kernel.dll",
+        )
+        for path in candidates:
+            try:
+                if not path.exists():
+                    continue
+                self.dll = ctypes.WinDLL(str(path))
+                break
+            except OSError:
+                self.dll = None
+        if self.dll is None:
+            return
+
+        self.dll.rhk_create.restype = ctypes.c_void_p
+        self.dll.rhk_destroy.argtypes = [ctypes.c_void_p]
+        self.dll.rhk_start.argtypes = [ctypes.c_void_p]
+        self.dll.rhk_stop.argtypes = [ctypes.c_void_p]
+        self.dll.rhk_clear_config.argtypes = [ctypes.c_void_p]
+        self.dll.rhk_set_target_active.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.dll.rhk_set_active.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+        self.dll.rhk_is_active.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.dll.rhk_is_active.restype = ctypes.c_int
+        self.dll.rhk_configure_macro.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.POINTER(FAST_EVENT),
+            ctypes.c_int,
+        ]
+        self.handle = ctypes.c_void_p(self.dll.rhk_create())
+        if not self.handle:
+            self.dll = None
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    @property
+    def available(self) -> bool:
+        return self.supported and self.dll is not None and bool(self.handle)
+
+    def configure(self, macros: list[MacroConfig]) -> None:
+        if self.dll is None or not self.handle:
+            return
+        if len(macros) > 64:
+            self.supported = False
+            self.slots = {}
+            self.dll.rhk_clear_config(self.handle)
+            return
+        self.supported = True
+        self.slots = {macro.id: index for index, macro in enumerate(macros[:64])}
+        self.dll.rhk_clear_config(self.handle)
+        for index, macro in enumerate(macros[:64]):
+            sequence_values = [
+                value for item in macro.sequence
+                if (value := _native_item_code(item))
+            ]
+            hold_values = [
+                value for item in hold_items(macro)
+                if (value := _native_item_code(item))
+            ]
+            recording_values = normalize_recording(macro.recording)
+            sequence_array = (ctypes.c_int * max(1, len(sequence_values)))(*sequence_values)
+            hold_array = (ctypes.c_int * max(1, len(hold_values)))(*hold_values)
+            event_values = []
+            for event in recording_values:
+                item = _native_item_code(press_key_label_to_id(str(event.get("key", ""))))
+                event_type = 1 if str(event.get("type", "")) == "key_down" else 2
+                if not item:
+                    continue
+                try:
+                    at_ms = max(0, int(event.get("at_ms", 0)))
+                except (TypeError, ValueError):
+                    at_ms = 0
+                try:
+                    x = int(event.get("x", 0))
+                    y = int(event.get("y", 0))
+                except (TypeError, ValueError):
+                    x, y = 0, 0
+                event_values.append(FAST_EVENT(event_type, item, at_ms, x, y, int("x" in event and "y" in event)))
+            event_array = (FAST_EVENT * max(1, len(event_values)))()
+            for event_index, event in enumerate(event_values):
+                event_array[event_index] = event
+            action_id = {
+                ACTION_NONE: 0,
+                ACTION_HOLD: 1,
+                ACTION_PRESS_CYCLE: 2,
+                ACTION_RECORDED: 3,
+            }.get(macro.action, 0)
+            self.dll.rhk_configure_macro(
+                self.handle,
+                index,
+                int(bool(macro.enabled)),
+                action_id,
+                max(int(macro.interval_ms), MIN_MACRO_INTERVAL_MS),
+                int(macro.playback_mode == PLAYBACK_LOOP),
+                sequence_array,
+                len(sequence_values),
+                hold_array,
+                len(hold_values),
+                event_array,
+                len(event_values),
+            )
+
+    def start(self) -> None:
+        if self.available:
+            self.dll.rhk_start(self.handle)
+
+    def stop(self) -> None:
+        if self.dll is not None and self.handle:
+            self.dll.rhk_stop(self.handle)
+
+    def close(self) -> None:
+        if self.dll is not None and self.handle:
+            self.dll.rhk_destroy(self.handle)
+            self.handle = None
+            self.dll = None
+
+    def set_target_active(self, active: bool) -> None:
+        if self.available:
+            self.target_active = bool(active)
+            self.dll.rhk_set_target_active(self.handle, int(self.target_active))
+
+    def set_active(self, macro_id: str, active: bool) -> None:
+        if self.available and macro_id in self.slots:
+            self.dll.rhk_set_active(self.handle, self.slots[macro_id], int(bool(active)))
+
+    def is_active(self, macro_id: str) -> bool:
+        if not self.available or macro_id not in self.slots:
+            return False
+        return bool(self.dll.rhk_is_active(self.handle, self.slots[macro_id]))
+
+    def reset_active(self) -> None:
+        if not self.available:
+            return
+        self.dll.rhk_set_target_active(self.handle, 0)
+        if self.target_active:
+            self.dll.rhk_set_target_active(self.handle, 1)
 
 
 @dataclass
@@ -551,10 +736,21 @@ class MacroEngine:
         self.recording_started_at = 0.0
         self.recorded_events: list[dict[str, object]] = []
         self.record_last_down: dict[str, bool] = {}
+        self.native_kernel = FastInputKernel()
+        self.native_started = False
+
+    @property
+    def native_enabled(self) -> bool:
+        return self.native_started and self.native_kernel.available
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
             return
+        if self.native_kernel.available:
+            self.native_kernel.configure(self.config.macros or [])
+            if self.native_kernel.available:
+                self.native_kernel.start()
+                self.native_started = True
         self.running = True
         self.thread = threading.Thread(target=self._run, name="macro-engine", daemon=True)
         self.thread.start()
@@ -566,6 +762,9 @@ class MacroEngine:
         with self.lock:
             self.active_macros.clear()
         self.release_all_inputs_with_retry()
+        self.native_kernel.stop()
+        self.native_kernel.close()
+        self.native_started = False
 
     def update_config(self, config: Config) -> None:
         config = normalize_config(config)
@@ -582,6 +781,8 @@ class MacroEngine:
                 self._cancel_recording_locked()
             if self.target_active:
                 self._seed_trigger_states_locked(config)
+            if self.native_kernel.available:
+                self.native_kernel.configure(config.macros or [])
             self.release_all_inputs()
 
     def update_route_selection(self, route_id: str) -> Config:
@@ -654,6 +855,8 @@ class MacroEngine:
                 self.target_active = target_active
                 self.foreground_title = title
                 self.foreground_process = process
+                if self.native_enabled:
+                    self.native_kernel.set_target_active(target_active)
                 if target_active and target_rect is not None:
                     self.target_window_rect = rect_to_tuple(target_rect)
 
@@ -723,6 +926,11 @@ class MacroEngine:
                         self._toggle_macro(macro)
                     self.last_trigger_down[trigger_key] = down
 
+                if self.native_enabled:
+                    for macro in config.macros or []:
+                        if macro.action == ACTION_RECORDED and macro.id in self.active_macros and not self.native_kernel.is_active(macro.id):
+                            self.active_macros.discard(macro.id)
+
                 active_cycle_macros = [
                     macro for macro in (config.macros or [])
                     if target_active and macro.enabled and macro.action == ACTION_PRESS_CYCLE and macro.id in self.active_macros
@@ -741,26 +949,33 @@ class MacroEngine:
             with self.lock:
                 self._advance_recording_locked(config, target_active, now)
 
-            for macro in active_cycle_macros:
-                with self.lock:
-                    if not self.target_active or macro.id not in self.active_macros:
-                        continue
-                    if now < self.next_press_at.get(macro.id, 0.0):
-                        continue
-                    sequence = [item for item in macro.sequence if item != "none"]
-                    if sequence:
-                        index = self.sequence_index.get(macro.id, 0) % len(sequence)
-                        self._press_cycle_item(sequence[index])
-                        self.sequence_index[macro.id] = index + 1
-                        self.next_press_at[macro.id] = now + (max(macro.interval_ms, MIN_MACRO_INTERVAL_MS) / 1000)
+            if not self.native_enabled:
+                for macro in active_cycle_macros:
+                    with self.lock:
+                        if not self.target_active or macro.id not in self.active_macros:
+                            continue
+                        if now < self.next_press_at.get(macro.id, 0.0):
+                            continue
+                        sequence = [item for item in macro.sequence if item != "none"]
+                        if sequence:
+                            index = self.sequence_index.get(macro.id, 0) % len(sequence)
+                            self._press_cycle_item(sequence[index])
+                            self.sequence_index[macro.id] = index + 1
+                            self.next_press_at[macro.id] = now + (max(macro.interval_ms, MIN_MACRO_INTERVAL_MS) / 1000)
 
-            for macro in active_recorded_macros:
-                with self.lock:
-                    if self.target_active and macro.id in self.active_macros:
-                        self._advance_recorded_playback(macro, now)
+                for macro in active_recorded_macros:
+                    with self.lock:
+                        if self.target_active and macro.id in self.active_macros:
+                            self._advance_recorded_playback(macro, now)
 
             recording_active = self.recording_status == "recording"
             poll_ms = min(max(config.poll_interval_ms, 10), MAX_FOREGROUND_POLL_MS)
+            active_intervals = [
+                max(int(macro.interval_ms), MIN_MACRO_INTERVAL_MS)
+                for macro in (*active_cycle_macros, *active_recorded_macros)
+            ]
+            if active_intervals and not self.native_enabled:
+                poll_ms = min(poll_ms, min(active_intervals))
             time.sleep(0.01 if recording_active else poll_ms / 1000)
 
     def _read_foreground_window(self) -> tuple[int, str, str]:
@@ -805,6 +1020,9 @@ class MacroEngine:
         if macro.id in self.active_macros:
             return
         self.active_macros.add(macro.id)
+        if self.native_enabled:
+            self.native_kernel.set_active(macro.id, True)
+            return
         if macro.action == ACTION_HOLD:
             for item in hold_items(macro):
                 if not self._item_has_owner(item, excluding_hold_macro_id=macro.id):
@@ -818,6 +1036,9 @@ class MacroEngine:
     def _deactivate_macro(self, macro: MacroConfig) -> None:
         if macro.id in self.active_macros:
             self.active_macros.remove(macro.id)
+            if self.native_enabled:
+                self.native_kernel.set_active(macro.id, False)
+                return
             if macro.action == ACTION_HOLD:
                 for item in hold_items(macro):
                     if not self._item_has_owner(item):
@@ -845,6 +1066,8 @@ class MacroEngine:
         self.next_press_at.clear()
         self.sequence_index.clear()
         self.playback_state.clear()
+        if self.native_enabled:
+            self.native_kernel.reset_active()
 
     def _item_has_owner(
         self,
@@ -1136,6 +1359,8 @@ class MacroEngine:
             self.playback_held_items.setdefault(failed_owner, set()).update(failed_items)
 
     def release_all_inputs(self) -> bool:
+        if self.native_enabled:
+            self.native_kernel.reset_active()
         cleanup_actions: tuple[Callable[[], None], ...] = (
             self.release_playback_items,
             self.release_right,
@@ -2245,7 +2470,7 @@ class ConfigWindow:
             for child in interval_frame.winfo_children():
                 child.destroy()
             if action == ACTION_PRESS_CYCLE or (action == ACTION_RECORDED and playback_mode_label_to_id(str(vars_for_row["playback_mode"].get())) == PLAYBACK_LOOP):
-                ttk.Spinbox(interval_frame, from_=MIN_MACRO_INTERVAL_MS, to=5000, increment=5, textvariable=vars_for_row["interval"], width=7).grid(row=0, column=0, sticky="w")
+                ttk.Spinbox(interval_frame, from_=MIN_MACRO_INTERVAL_MS, to=5000, increment=1, textvariable=vars_for_row["interval"], width=7).grid(row=0, column=0, sticky="w")
 
     def _set_widget_tree_enabled(self, widget: tk.Widget, enabled: bool) -> None:
         self._set_widget_enabled(widget, enabled)

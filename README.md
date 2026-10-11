@@ -164,8 +164,10 @@ F10、F11 和 F12 都会先停止当前运行的全部宏并释放已按住的�
 连按间隔：
 
 - 手动输入毫秒数，默认 100ms。
-- 最低不能小于 25ms。
+- 最低不能小于 1ms。
 - 建议先使用 100ms；如果游戏内出现漏按，可以适当调高到 150ms、250ms 或更慢。
+
+当使用源码启动或运行打包版本时，自动按住、循环连按和录制回放会优先交给 `native/fast_input_kernel.dll` 执行。这个 Windows 原生内核使用高精度计时器和独立线程调度 `SendInput`，Python 负责配置窗口、触发键和界面；DLL 不可用时会自动回退到 Python 调度。1ms 是调度目标，Windows 调度、输入队列和游戏自身仍可能带来额外延迟，不能保证每次事件的实际间隔都恰好为 1ms。
 
 ### 录制回放
 
@@ -228,6 +230,8 @@ D4Helper v1.5.1
 python -m pip install pyinstaller pystray pillow
 .\build.ps1
 ```
+
+编译原生内核需要 Visual Studio 的“使用 C++ 的桌面开发”工作负载。`build.ps1` 会先编译 `native/fast_input_kernel.cpp`，再把 DLL 放进单文件程序；只运行 Python 源码时，也可以单独执行 `native\build.ps1`。
 
 输出：
 

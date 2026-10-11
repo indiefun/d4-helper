@@ -50,10 +50,16 @@ jobs:
         shell: pwsh
         run: ./build.ps1
 
-      - name: Package release zip
+      - name: Prepare portable release assets
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          Compress-Archive -Path .\dist\D4Helper.exe, .\dist\config.json, .\dist\VERSION -DestinationPath ".\dist\D4Helper-windows-latest.zip" -Force
+          $versionedArchive = ".\dist\D4Helper-portable-v$env:VERSION.zip"
+          if (-not (Test-Path -LiteralPath $versionedArchive)) {
+            throw "Portable archive was not created: $versionedArchive"
+          }
+          Copy-Item -LiteralPath $versionedArchive -Destination ".\dist\D4Helper-windows-latest.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -63,6 +69,7 @@ jobs:
             dist/D4Helper.exe
             dist/config.json
             dist/VERSION
+            dist/D4Helper-portable-v*.zip
             dist/D4Helper-windows-latest.zip
 
       - name: Create GitHub release

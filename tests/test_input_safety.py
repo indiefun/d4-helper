@@ -29,6 +29,20 @@ class InputSafetyTests(unittest.TestCase):
         with app.PENDING_RELEASES_LOCK:
             app.PENDING_RELEASES.clear()
 
+    def test_macro_interval_allows_one_millisecond(self):
+        self.assertEqual(app.parse_interval_ms(1, "快速连击"), 1)
+        macro = app.MacroConfig(True, "测试", "f1", app.ACTION_PRESS_CYCLE, ["f"], 0, "test")
+        self.assertEqual(app.normalize_macros([macro])[0].interval_ms, 1)
+
+    def test_native_kernel_accepts_macro_definition(self):
+        kernel = app.FastInputKernel()
+        self.addCleanup(kernel.close)
+        if not kernel.available:
+            self.skipTest("native kernel DLL is not built")
+        macro = app.MacroConfig(True, "测试", "f1", app.ACTION_PRESS_CYCLE, ["f"], 1, "native")
+        kernel.configure([macro])
+        self.assertEqual(kernel.slots, {"native": 0})
+
     def test_empty_cleanup_does_not_emit_mouse_events(self):
         engine = app.MacroEngine(app.Config(macros=[]))
         fake = FakeUser32()
