@@ -333,6 +333,12 @@ DEFAULT_INTERVAL_MS = 100
 MIN_MACRO_INTERVAL_MS = 1
 DEFAULT_POLL_INTERVAL_MS = 50
 DEFAULT_OVERLAY_OPACITY = 0.60
+DEFAULT_OVERLAY_AVOID_MOUSE = True
+DEFAULT_OVERLAY_AVOID_DISTANCE = 72
+MIN_OVERLAY_AVOID_DISTANCE = 16
+MAX_OVERLAY_AVOID_DISTANCE = 400
+OVERLAY_AVOID_MARGIN = 24
+OVERLAY_AVOID_COOLDOWN_SECONDS = 0.35
 DEFAULT_RECORD_TRIGGER = "f12"
 DEFAULT_RECORD_COUNTDOWN_SEC = 3
 DEFAULT_RECORD_MAX_SECONDS = 30
@@ -678,6 +684,8 @@ class Config:
     overlay_x: int = 20
     overlay_y: int = 20
     overlay_opacity: float = DEFAULT_OVERLAY_OPACITY
+    overlay_avoid_mouse: bool = DEFAULT_OVERLAY_AVOID_MOUSE
+    overlay_avoid_distance: int = DEFAULT_OVERLAY_AVOID_DISTANCE
     recording_trigger: str = DEFAULT_RECORD_TRIGGER
     recording_countdown_sec: int = DEFAULT_RECORD_COUNTDOWN_SEC
     recording_max_seconds: int = DEFAULT_RECORD_MAX_SECONDS
@@ -1411,6 +1419,9 @@ class OverlayWindow:
         self._drag_offset = (0, 0)
         self._game_rect: wintypes.RECT | None = None
         self._drag_game_rect: wintypes.RECT | None = None
+        self._avoid_position: tuple[int, int] | None = None
+        self._avoid_anchor: tuple[tuple[int, int, int, int] | None, int, int, int, int] | None = None
+        self._last_avoid_at = 0.0
 
         self.canvas = tk.Canvas(
             self.window,
@@ -1429,6 +1440,9 @@ class OverlayWindow:
         self.layout_mode = bool(enabled)
         self._dragging = False
         self._drag_game_rect = None
+        self._avoid_position = None
+        self._avoid_anchor = None
+        self._last_avoid_at = 0.0
         self.canvas.configure(cursor="fleur" if self.layout_mode else "")
         self._last_geometry = ""
         self._apply_window_style(transparent=not self.layout_mode, force=True)
@@ -1454,11 +1468,47 @@ class OverlayWindow:
         if snapshot.target_window_rect is not None:
             self._game_rect = copy_window_rect(rect)
         if rect is not None:
-            x = rect.left + snapshot.config.overlay_x
-            y = rect.top + snapshot.config.overlay_y
+            configured_x = rect.left + snapshot.config.overlay_x
+            configured_y = rect.top + snapshot.config.overlay_y
         else:
-            x = snapshot.config.overlay_x
-            y = snapshot.config.overlay_y
+            configured_x = snapshot.config.overlay_x
+            configured_y = snapshot.config.overlay_y
+        rect_tuple = rect_to_tuple(rect) if rect is not None else None
+        avoid_anchor = (rect_tuple, int(configured_x), int(configured_y), self.width, self.height)
+        if avoid_anchor != self._avoid_anchor:
+            self._avoid_anchor = avoid_anchor
+            self._avoid_position = None
+            self._last_avoid_at = 0.0
+        if self.layout_mode or not snapshot.config.overlay_avoid_mouse:
+            self._avoid_position = None
+        x, y = self._avoid_position or (configured_x, configured_y)
+        # Proximity must use the position actually displayed after screen clamping.
+        x, y = clamp_to_virtual_desktop(x, y, self.width, self.height)
+        if (
+            not self.layout_mode
+            and snapshot.config.overlay_avoid_mouse
+            and snapshot.target_active
+            and time.monotonic() - self._last_avoid_at >= OVERLAY_AVOID_COOLDOWN_SECONDS
+        ):
+            cursor = get_cursor_position()
+            if (
+                cursor is not None
+                and point_to_rect_distance_squared(cursor, x, y, self.width, self.height)
+                < snapshot.config.overlay_avoid_distance ** 2
+            ):
+                avoided = choose_overlay_avoid_position(
+                    x,
+                    y,
+                    self.width,
+                    self.height,
+                    rect_tuple,
+                    cursor,
+                    snapshot.config.overlay_avoid_distance,
+                )
+                if avoided is not None:
+                    self._avoid_position = avoided
+                    self._last_avoid_at = time.monotonic()
+                    x, y = avoided
         x, y = clamp_to_virtual_desktop(x, y, self.width, self.height)
         geometry = window_geometry(self.width, self.height, x, y)
         if not self._dragging and geometry != self._last_geometry:
@@ -2065,6 +2115,8 @@ class ConfigWindow:
         self.overlay_y_var = tk.IntVar()
         self.overlay_opacity_var = tk.DoubleVar()
         self.overlay_opacity_text_var = tk.StringVar()
+        self.overlay_avoid_mouse_var = tk.BooleanVar()
+        self.overlay_avoid_distance_var = tk.IntVar()
         self.recording_trigger_var = tk.StringVar()
         self.recording_countdown_var = tk.IntVar()
         self.recording_max_seconds_var = tk.IntVar()
@@ -2604,6 +2656,8 @@ class ConfigWindow:
         self.overlay_x_var.set(config.overlay_x)
         self.overlay_y_var.set(config.overlay_y)
         self.overlay_opacity_var.set(config.overlay_opacity)
+        self.overlay_avoid_mouse_var.set(config.overlay_avoid_mouse)
+        self.overlay_avoid_distance_var.set(config.overlay_avoid_distance)
         self.recording_trigger_var.set(optional_trigger_id_to_label(config.recording_trigger))
         self.recording_countdown_var.set(config.recording_countdown_sec)
         self.recording_max_seconds_var.set(config.recording_max_seconds)
@@ -2711,6 +2765,19 @@ class ConfigWindow:
         opacity_row.columnconfigure(0, weight=1)
         ttk.Scale(opacity_row, from_=0.2, to=1.0, variable=self.overlay_opacity_var, orient="horizontal").grid(row=0, column=0, sticky="ew")
         ttk.Label(opacity_row, textvariable=self.overlay_opacity_text_var, width=6).grid(row=0, column=1, padx=(8, 0))
+        ttk.Checkbutton(overlay, text="鼠标接近时自动躲避", variable=self.overlay_avoid_mouse_var).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 2))
+        avoid_distance = ttk.Frame(overlay)
+        avoid_distance.grid(row=5, column=0, columnspan=2, sticky="w", **pad)
+        ttk.Label(avoid_distance, text="躲避距离").pack(side="left")
+        ttk.Spinbox(
+            avoid_distance,
+            from_=MIN_OVERLAY_AVOID_DISTANCE,
+            to=MAX_OVERLAY_AVOID_DISTANCE,
+            increment=4,
+            textvariable=self.overlay_avoid_distance_var,
+            width=6,
+        ).pack(side="left", padx=(8, 4))
+        ttk.Label(avoid_distance, text="像素（鼠标进入浮窗外圈后移动）", foreground="#666666").pack(side="left")
 
         recording = ttk.LabelFrame(main, text="宏录制")
         recording.pack(fill="x", pady=(0, 8))
@@ -2804,6 +2871,8 @@ class ConfigWindow:
                 overlay_x=int(self.overlay_x_var.get()),
                 overlay_y=int(self.overlay_y_var.get()),
                 overlay_opacity=float(self.overlay_opacity_var.get()),
+                overlay_avoid_mouse=bool(self.overlay_avoid_mouse_var.get()),
+                overlay_avoid_distance=int(self.overlay_avoid_distance_var.get()),
                 recording_trigger=optional_trigger_label_to_id(str(self.recording_trigger_var.get()).strip()),
                 recording_countdown_sec=int(self.recording_countdown_var.get()),
                 recording_max_seconds=int(self.recording_max_seconds_var.get()),
@@ -3237,6 +3306,8 @@ def normalize_config(config: Config) -> Config:
         overlay_x=int(config.overlay_x),
         overlay_y=int(config.overlay_y),
         overlay_opacity=float(config.overlay_opacity),
+        overlay_avoid_mouse=bool(config.overlay_avoid_mouse),
+        overlay_avoid_distance=int(config.overlay_avoid_distance),
         recording_trigger=optional_trigger_label_to_id(str(config.recording_trigger)),
         recording_countdown_sec=max(int(config.recording_countdown_sec), 0),
         recording_max_seconds=max(int(config.recording_max_seconds), 1),
@@ -3269,6 +3340,8 @@ def clone_config(config: Config) -> Config:
         overlay_x=normalized.overlay_x,
         overlay_y=normalized.overlay_y,
         overlay_opacity=normalized.overlay_opacity,
+        overlay_avoid_mouse=normalized.overlay_avoid_mouse,
+        overlay_avoid_distance=normalized.overlay_avoid_distance,
         recording_trigger=normalized.recording_trigger,
         recording_countdown_sec=normalized.recording_countdown_sec,
         recording_max_seconds=normalized.recording_max_seconds,
@@ -3492,6 +3565,8 @@ def load_config(path: Path) -> Config:
         overlay_x=int(raw.get("overlay_x", 20)),
         overlay_y=int(raw.get("overlay_y", 20)),
         overlay_opacity=float(raw.get("overlay_opacity", DEFAULT_OVERLAY_OPACITY)),
+        overlay_avoid_mouse=bool(raw.get("overlay_avoid_mouse", DEFAULT_OVERLAY_AVOID_MOUSE)),
+        overlay_avoid_distance=int(raw.get("overlay_avoid_distance", DEFAULT_OVERLAY_AVOID_DISTANCE)),
         recording_trigger=str(raw.get("recording_trigger", DEFAULT_RECORD_TRIGGER)).strip(),
         recording_countdown_sec=int(raw.get("recording_countdown_sec", DEFAULT_RECORD_COUNTDOWN_SEC)),
         recording_max_seconds=int(raw.get("recording_max_seconds", DEFAULT_RECORD_MAX_SECONDS)),
@@ -3571,6 +3646,8 @@ def validate_config(config: Config) -> None:
         raise ValueError(f"浮层调整不能和线路图使用同一个按键：{trigger_id_to_label(config.overlay_layout_trigger)}。")
     if not -5000 <= config.overlay_x <= 5000 or not -5000 <= config.overlay_y <= 5000:
         raise ValueError("状态浮层坐标必须在 -5000 到 5000 之间。")
+    if not MIN_OVERLAY_AVOID_DISTANCE <= config.overlay_avoid_distance <= MAX_OVERLAY_AVOID_DISTANCE:
+        raise ValueError(f"浮层躲避距离必须在 {MIN_OVERLAY_AVOID_DISTANCE} 到 {MAX_OVERLAY_AVOID_DISTANCE} 像素之间。")
     if not -5000 <= config.route_x <= 5000 or not -5000 <= config.route_y <= 5000:
         raise ValueError("线路图坐标必须在 -5000 到 5000 之间。")
     if config.route_size not in ROUTE_SIZE_LABELS:
@@ -3612,6 +3689,74 @@ def clamp_to_virtual_desktop(x: int, y: int, width: int, height: int, visible: i
     min_y = top - max(int(height) - visible_y, 0)
     max_y = bottom - visible_y
     return int(clamp(int(x), min_x, max_x)), int(clamp(int(y), min_y, max_y))
+
+
+def point_to_rect_distance_squared(point: tuple[int, int], x: int, y: int, width: int, height: int) -> int:
+    point_x, point_y = point
+    dx = max(x - point_x, 0, point_x - (x + width))
+    dy = max(y - point_y, 0, point_y - (y + height))
+    return dx * dx + dy * dy
+
+
+def choose_overlay_avoid_position(
+    current_x: int,
+    current_y: int,
+    width: int,
+    height: int,
+    target_rect: tuple[int, int, int, int] | None,
+    cursor: tuple[int, int] | None,
+    distance: int,
+    margin: int = OVERLAY_AVOID_MARGIN,
+) -> tuple[int, int] | None:
+    """Choose a stable game-window position that keeps the cursor away."""
+    if target_rect is None or cursor is None or width <= 0 or height <= 0:
+        return None
+    left, top, right, bottom = (int(value) for value in target_rect)
+    if right < left:
+        left, right = right, left
+    if bottom < top:
+        top, bottom = bottom, top
+    desktop_left, desktop_top, desktop_right, desktop_bottom = virtual_desktop_bounds()
+    left, top = max(left, desktop_left), max(top, desktop_top)
+    right, bottom = min(right, desktop_right), min(bottom, desktop_bottom)
+    if right - left < width or bottom - top < height:
+        return None
+    margin = max(int(margin), 0)
+    inner_left = left + margin
+    inner_top = top + margin
+    inner_right = right - width - margin
+    inner_bottom = bottom - height - margin
+    if inner_right < inner_left:
+        inner_left, inner_right = left, max(left, right - width)
+    if inner_bottom < inner_top:
+        inner_top, inner_bottom = top, max(top, bottom - height)
+
+    raw_candidates = (
+        (inner_left, inner_top),
+        (inner_right, inner_top),
+        (inner_left, inner_bottom),
+        (inner_right, inner_bottom),
+        ((inner_left + inner_right) // 2, inner_top),
+        ((inner_left + inner_right) // 2, inner_bottom),
+        (inner_left, (inner_top + inner_bottom) // 2),
+        (inner_right, (inner_top + inner_bottom) // 2),
+    )
+    danger_squared = max(int(distance), 0) ** 2
+    safe_candidates = [
+        candidate
+        for candidate in raw_candidates
+        if point_to_rect_distance_squared(cursor, candidate[0], candidate[1], width, height) >= danger_squared
+    ]
+    if not safe_candidates:
+        return None
+    best = max(
+        safe_candidates,
+        key=lambda candidate: (
+            point_to_rect_distance_squared(cursor, candidate[0], candidate[1], width, height),
+            -((candidate[0] - current_x) ** 2 + (candidate[1] - current_y) ** 2),
+        ),
+    )
+    return None if best == (int(current_x), int(current_y)) else best
 
 
 def get_window_rect(hwnd: int) -> wintypes.RECT | None:
@@ -3778,14 +3923,14 @@ def run_gui(config: Config, config_path: Path) -> int:
                 set_layout_mode(False)
         overlay.refresh()
         route_overlay.refresh()
-        root.after(120, tick)
+        root.after(50, tick)
 
     def handle_stop(_signum: int, _frame: object) -> None:
         command_queue.put("quit")
 
     signal.signal(signal.SIGINT, handle_stop)
     signal.signal(signal.SIGTERM, handle_stop)
-    root.after(120, tick)
+    root.after(50, tick)
 
     try:
         root.mainloop()
