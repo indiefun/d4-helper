@@ -55,7 +55,6 @@ def resource_path(relative_path: str) -> Path:
 CONFIG_PATH = app_dir() / "config.json"
 DONATE_IMAGE_PATH = resource_path("assets/donate.jpg")
 APP_ICON_PATH = resource_path("assets/app-icon.png")
-WORM_ROUTE_DIR = resource_path("assets/worm-routes")
 VERSION_PATH = app_dir() / "VERSION"
 BUNDLED_VERSION_PATH = resource_path("VERSION")
 
@@ -90,7 +89,6 @@ WS_EX_TRANSPARENT = 0x00000020
 WS_EX_LAYERED = 0x00080000
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_NOACTIVATE = 0x08000000
-GA_ROOT = 2
 HWND_TOPMOST = wintypes.HWND(-1)
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
@@ -342,51 +340,9 @@ OVERLAY_AVOID_COOLDOWN_SECONDS = 0.35
 DEFAULT_RECORD_TRIGGER = "f12"
 DEFAULT_RECORD_COUNTDOWN_SEC = 3
 DEFAULT_RECORD_MAX_SECONDS = 30
-DEFAULT_ROUTE_TRIGGER = "f11"
-DEFAULT_OVERLAY_LAYOUT_TRIGGER = "f10"
-DEFAULT_ROUTE_OPACITY = 0.90
-DEFAULT_ROUTE_X = 1000
-DEFAULT_ROUTE_Y = 120
 MAX_RECORDED_EVENTS = 500
 MAX_FOREGROUND_POLL_MS = 50
 FOREGROUND_METADATA_REFRESH_SECONDS = 1.0
-
-ROUTE_SIZE_LABELS = {
-    "small": "小",
-    "medium": "中",
-    "large": "大",
-}
-
-
-@dataclass(frozen=True)
-class WormRouteMap:
-    id: str
-    name: str
-
-    @property
-    def image_path(self) -> Path:
-        return WORM_ROUTE_DIR / f"route-{self.id}.webp"
-
-    @property
-    def thumbnail_path(self) -> Path:
-        return WORM_ROUTE_DIR / "thumbnails" / f"thumb-{self.id}.webp"
-
-
-WORM_ROUTE_MAPS = (
-    WormRouteMap("01", "马洛文"),
-    WormRouteMap("03", "图尔杜拉"),
-    WormRouteMap("14", "黑石警戒塔"),
-    WormRouteMap("15", "基兰岱"),
-    WormRouteMap("19", "墨涅斯塔"),
-    WormRouteMap("21", "基奥瓦沙西"),
-    WormRouteMap("25", "废墟祭坛"),
-    WormRouteMap("26", "铁狼营地"),
-    WormRouteMap("28", "吉库尔"),
-    WormRouteMap("32", "维金哈尼"),
-    WormRouteMap("33", "扎宾泽特西"),
-)
-WORM_ROUTE_MAP_BY_ID = {route.id: route for route in WORM_ROUTE_MAPS}
-
 
 class MOUSEINPUT(ctypes.Structure):
     _fields_ = [
@@ -681,22 +637,12 @@ class Config:
     toggle_profiles: list[ToggleProfile] | None = None
     poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS
     overlay_enabled: bool = True
-    overlay_x: int = 20
-    overlay_y: int = 20
     overlay_opacity: float = DEFAULT_OVERLAY_OPACITY
     overlay_avoid_mouse: bool = DEFAULT_OVERLAY_AVOID_MOUSE
     overlay_avoid_distance: int = DEFAULT_OVERLAY_AVOID_DISTANCE
     recording_trigger: str = DEFAULT_RECORD_TRIGGER
     recording_countdown_sec: int = DEFAULT_RECORD_COUNTDOWN_SEC
     recording_max_seconds: int = DEFAULT_RECORD_MAX_SECONDS
-    route_enabled: bool = True
-    route_trigger: str = DEFAULT_ROUTE_TRIGGER
-    overlay_layout_trigger: str = DEFAULT_OVERLAY_LAYOUT_TRIGGER
-    route_x: int = DEFAULT_ROUTE_X
-    route_y: int = DEFAULT_ROUTE_Y
-    route_size: str = "medium"
-    route_opacity: float = DEFAULT_ROUTE_OPACITY
-    route_last_selected: str = "01"
 
 
 @dataclass(frozen=True)
@@ -738,7 +684,6 @@ class MacroEngine:
         self.foreground_hwnd = 0
         self.foreground_metadata_at = 0.0
         self.target_window_rect: tuple[int, int, int, int] | None = None
-        self.overlay_layout_active = False
         self.recording_status = "idle"
         self.recording_countdown_until = 0.0
         self.recording_started_at = 0.0
@@ -793,26 +738,6 @@ class MacroEngine:
                 self.native_kernel.configure(config.macros or [])
             self.release_all_inputs()
 
-    def update_route_selection(self, route_id: str) -> Config:
-        with self.lock:
-            if route_id in WORM_ROUTE_MAP_BY_ID:
-                self.config.route_last_selected = route_id
-            return clone_config(self.config)
-
-    def update_overlay_position(self, overlay_name: str, x: int, y: int) -> Config:
-        with self.lock:
-            if overlay_name == "status":
-                self.config.overlay_x = int(x)
-                self.config.overlay_y = int(y)
-            elif overlay_name == "route":
-                self.config.route_x = int(x)
-                self.config.route_y = int(y)
-            return clone_config(self.config)
-
-    def set_overlay_layout_active(self, active: bool) -> None:
-        with self.lock:
-            self.overlay_layout_active = bool(active)
-
     def snapshot(self) -> Snapshot:
         with self.lock:
             return Snapshot(
@@ -854,7 +779,6 @@ class MacroEngine:
             target_rect = get_window_rect(hwnd) if target_active else None
 
             release_inputs = False
-            special_event: str | None = None
             with self.lock:
                 if config_generation != self.config_generation:
                     config = clone_config(self.config)
@@ -880,33 +804,7 @@ class MacroEngine:
 
                 recording_triggered = self._handle_recording_trigger_locked(config, target_active)
 
-                layout_virtual_key = TRIGGER_KEYS.get(config.overlay_layout_trigger)
-                layout_down = is_key_down(layout_virtual_key) if layout_virtual_key is not None else False
-                layout_trigger_key = "overlay:layout"
-                layout_triggered = (
-                    (target_active or self.overlay_layout_active)
-                    and layout_down
-                    and not self.last_trigger_down.get(layout_trigger_key, False)
-                )
-                self.last_trigger_down[layout_trigger_key] = layout_down
-
-                route_virtual_key = TRIGGER_KEYS.get(config.route_trigger)
-                route_down = is_key_down(route_virtual_key) if route_virtual_key is not None else False
-                route_trigger_key = "route:toggle"
-                route_triggered = (
-                    config.route_enabled
-                    and target_active
-                    and route_down
-                    and not self.last_trigger_down.get(route_trigger_key, False)
-                )
-                self.last_trigger_down[route_trigger_key] = route_down
-
-                if layout_triggered or route_triggered:
-                    if self.recording_status in {"countdown", "recording"}:
-                        self._cancel_recording_locked()
-                    special_event = "overlay_layout_toggle" if layout_triggered else "route_toggle"
-
-                special_triggered = recording_triggered or layout_triggered or route_triggered
+                special_triggered = recording_triggered
                 if special_triggered:
                     self._clear_macro_state_locked()
                     release_inputs = True
@@ -950,9 +848,6 @@ class MacroEngine:
 
             if release_inputs:
                 self.release_all_inputs()
-            if special_event is not None and self.event_queue is not None:
-                self.event_queue.put({"type": special_event})
-
             now = time.monotonic()
             with self.lock:
                 self._advance_recording_locked(config, target_active, now)
@@ -1006,8 +901,6 @@ class MacroEngine:
 
     def _seed_trigger_states_locked(self, config: Config) -> None:
         self.last_trigger_down["recording:toggle"] = self._trigger_is_down(config.recording_trigger, optional=True)
-        self.last_trigger_down["overlay:layout"] = self._trigger_is_down(config.overlay_layout_trigger)
-        self.last_trigger_down["route:toggle"] = self._trigger_is_down(config.route_trigger)
         for profile in config.toggle_profiles or []:
             self.last_trigger_down[f"profile:{profile.id}"] = self._trigger_is_down(profile.trigger, optional=True)
         for macro in config.macros or []:
@@ -1398,11 +1291,9 @@ class OverlayWindow:
         self,
         root: tk.Tk,
         engine: MacroEngine,
-        position_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         self.root = root
         self.engine = engine
-        self.position_callback = position_callback
         self.width = 252
         self.height = 56
         self.max_rows = 6
@@ -1414,11 +1305,7 @@ class OverlayWindow:
         self.window.attributes("-alpha", DEFAULT_OVERLAY_OPACITY)
         self._last_geometry = ""
         self._overlay_style_applied = False
-        self.layout_mode = False
-        self._dragging = False
-        self._drag_offset = (0, 0)
         self._game_rect: wintypes.RECT | None = None
-        self._drag_game_rect: wintypes.RECT | None = None
         self._avoid_position: tuple[int, int] | None = None
         self._avoid_anchor: tuple[tuple[int, int, int, int] | None, int, int, int, int] | None = None
         self._last_avoid_at = 0.0
@@ -1432,31 +1319,16 @@ class OverlayWindow:
             bd=0,
         )
         self.canvas.pack(fill="both", expand=True)
-        self.canvas.bind("<ButtonPress-1>", self._on_drag_start)
-        self.canvas.bind("<B1-Motion>", self._on_drag_motion)
-        self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
-
-    def set_layout_mode(self, enabled: bool) -> None:
-        self.layout_mode = bool(enabled)
-        self._dragging = False
-        self._drag_game_rect = None
-        self._avoid_position = None
-        self._avoid_anchor = None
-        self._last_avoid_at = 0.0
-        self.canvas.configure(cursor="fleur" if self.layout_mode else "")
-        self._last_geometry = ""
-        self._apply_window_style(transparent=not self.layout_mode, force=True)
-        self.refresh()
 
     def refresh(self) -> None:
         snapshot = self.engine.snapshot()
-        if (not snapshot.config.overlay_enabled and not self.layout_mode) or (not snapshot.target_active and not self.layout_mode):
+        if not snapshot.config.overlay_enabled or not snapshot.target_active:
             self.window.withdraw()
             return
 
         visible_macros, total_count = self._visible_macros(snapshot)
         recording_visible = snapshot.recording_status in {"countdown", "recording"}
-        if not self.layout_mode and not recording_visible and not visible_macros and total_count == 0:
+        if not recording_visible and not visible_macros and total_count == 0:
             self.window.withdraw()
             return
 
@@ -1468,25 +1340,24 @@ class OverlayWindow:
         if snapshot.target_window_rect is not None:
             self._game_rect = copy_window_rect(rect)
         if rect is not None:
-            configured_x = rect.left + snapshot.config.overlay_x
-            configured_y = rect.top + snapshot.config.overlay_y
+            configured_x = rect.left + 20
+            configured_y = rect.top + 20
         else:
-            configured_x = snapshot.config.overlay_x
-            configured_y = snapshot.config.overlay_y
+            configured_x = 20
+            configured_y = 20
         rect_tuple = rect_to_tuple(rect) if rect is not None else None
         avoid_anchor = (rect_tuple, int(configured_x), int(configured_y), self.width, self.height)
         if avoid_anchor != self._avoid_anchor:
             self._avoid_anchor = avoid_anchor
             self._avoid_position = None
             self._last_avoid_at = 0.0
-        if self.layout_mode or not snapshot.config.overlay_avoid_mouse:
+        if not snapshot.config.overlay_avoid_mouse:
             self._avoid_position = None
         x, y = self._avoid_position or (configured_x, configured_y)
         # Proximity must use the position actually displayed after screen clamping.
         x, y = clamp_to_virtual_desktop(x, y, self.width, self.height)
         if (
-            not self.layout_mode
-            and snapshot.config.overlay_avoid_mouse
+            snapshot.config.overlay_avoid_mouse
             and snapshot.target_active
             and time.monotonic() - self._last_avoid_at >= OVERLAY_AVOID_COOLDOWN_SECONDS
         ):
@@ -1511,12 +1382,12 @@ class OverlayWindow:
                     x, y = avoided
         x, y = clamp_to_virtual_desktop(x, y, self.width, self.height)
         geometry = window_geometry(self.width, self.height, x, y)
-        if not self._dragging and geometry != self._last_geometry:
+        if geometry != self._last_geometry:
             self.window.geometry(geometry)
             self._last_geometry = geometry
         if self.window.state() == "withdrawn":
             self.window.deiconify()
-            self._apply_window_style(transparent=not self.layout_mode, force=True)
+            self._apply_window_style(transparent=True, force=True)
             self.window.attributes("-topmost", True)
             self.canvas.update_idletasks()
 
@@ -1553,30 +1424,15 @@ class OverlayWindow:
     def _draw(self, snapshot: Snapshot, visible_macros: list[MacroConfig], total_count: int) -> None:
         self.canvas.delete("all")
         self.canvas.configure(width=self.width, height=self.height)
-        border_color = "#f59e0b" if self.layout_mode else "#3a3a3a"
         self.canvas.create_rectangle(
             1,
             1,
             self.width - 2,
             self.height - 2,
             fill="#111111",
-            outline=border_color,
-            width=2 if self.layout_mode else 1,
+            outline="#3a3a3a",
+            width=1,
         )
-        if self.layout_mode:
-            layout_key = trigger_id_to_label(snapshot.config.overlay_layout_trigger)
-            self.canvas.create_text(
-                10, 9, text="拖动状态浮层", fill="#fbbf24",
-                font=("Microsoft YaHei UI", 9, "bold"), anchor="nw",
-            )
-            self.canvas.create_text(
-                self.width - 10, 9, text=f"{layout_key} 完成", fill="#d4d4d8",
-                font=("Microsoft YaHei UI", 8, "bold"), anchor="ne",
-            )
-            for index, macro in enumerate(visible_macros):
-                self._draw_status_row(28 + index * 22, macro, snapshot.macro_states.get(macro.id, False))
-            self.canvas.update_idletasks()
-            return
         if snapshot.recording_status in {"countdown", "recording"}:
             self._draw_recording(snapshot)
             self.canvas.update_idletasks()
@@ -1605,37 +1461,6 @@ class OverlayWindow:
         for index, macro in enumerate(visible_macros):
             self._draw_status_row(28 + index * 22, macro, snapshot.macro_states.get(macro.id, False))
         self.canvas.update_idletasks()
-
-    def _on_drag_start(self, event: tk.Event) -> None:
-        if not self.layout_mode:
-            return
-        self._dragging = True
-        self._drag_offset = (int(event.x), int(event.y))
-        self._drag_game_rect = copy_window_rect(self._game_rect)
-
-    def _on_drag_motion(self, event: tk.Event) -> None:
-        if not self.layout_mode or not self._dragging:
-            return
-        x = int(event.x_root) - self._drag_offset[0]
-        y = int(event.y_root) - self._drag_offset[1]
-        x, y = clamp_to_virtual_desktop(x, y, self.width, self.height)
-        geometry = window_geometry(self.width, self.height, x, y)
-        self.window.geometry(geometry)
-        self._last_geometry = geometry
-
-    def _on_drag_end(self, _event: tk.Event) -> None:
-        if not self.layout_mode or not self._dragging:
-            return
-        self._dragging = False
-        rect = self._drag_game_rect or self._game_rect
-        self._drag_game_rect = None
-        if rect is None:
-            return
-        self.window.update_idletasks()
-        relative_x = int(clamp(self.window.winfo_x() - rect.left, -5000, 5000))
-        relative_y = int(clamp(self.window.winfo_y() - rect.top, -5000, 5000))
-        if self.position_callback is not None:
-            self.position_callback(relative_x, relative_y)
 
     def _draw_recording(self, snapshot: Snapshot) -> None:
         self.canvas.create_text(
@@ -1715,387 +1540,6 @@ class OverlayWindow:
         return 30 + max(row_count, 1) * 22 + 8
 
 
-class WormRouteOverlay:
-    def __init__(
-        self,
-        root: tk.Tk,
-        engine: MacroEngine,
-        selection_callback: Callable[[str], None] | None = None,
-        position_callback: Callable[[int, int], None] | None = None,
-    ) -> None:
-        self.root = root
-        self.engine = engine
-        self.selection_callback = selection_callback
-        self.position_callback = position_callback
-        self.mode = "hidden"
-        self.return_mode = "hidden"
-        self.layout_mode = False
-        self._layout_return_mode = "hidden"
-        self._dragging = False
-        self._drag_offset = (0, 0)
-        self._game_rect: wintypes.RECT | None = None
-        self._drag_game_rect: wintypes.RECT | None = None
-        self.selected_id = engine.snapshot().config.route_last_selected
-        if self.selected_id not in WORM_ROUTE_MAP_BY_ID:
-            self.selected_id = WORM_ROUTE_MAPS[0].id
-
-        self.selector = tk.Toplevel(root)
-        self.selector.withdraw()
-        self.selector.overrideredirect(True)
-        self.selector.attributes("-topmost", True)
-        self.selector.configure(bg="#111111")
-        self.selector_canvas = tk.Canvas(self.selector, bg="#111111", highlightthickness=0, bd=0)
-        self.selector_canvas.pack(fill="both", expand=True)
-        self.selector_canvas.bind("<Button-1>", self._on_selector_click)
-
-        self.map_window = tk.Toplevel(root)
-        self.map_window.withdraw()
-        self.map_window.overrideredirect(True)
-        self.map_window.attributes("-topmost", True)
-        self.map_window.configure(bg="#111111")
-        self.map_canvas = tk.Canvas(self.map_window, bg="#111111", highlightthickness=0, bd=0)
-        self.map_canvas.pack(fill="both", expand=True)
-        self.map_canvas.bind("<ButtonPress-1>", self._on_drag_start)
-        self.map_canvas.bind("<B1-Motion>", self._on_drag_motion)
-        self.map_canvas.bind("<ButtonRelease-1>", self._on_drag_end)
-
-        self._selector_style_applied = False
-        self._map_style_applied = False
-        self._selector_hitboxes: list[tuple[int, int, int, int, str]] = []
-        self._selector_images: list[object] = []
-        self._selector_signature: tuple[object, ...] | None = None
-        self._map_image: object | None = None
-        self._map_signature: tuple[object, ...] | None = None
-
-    def set_layout_mode(self, enabled: bool) -> None:
-        enabled = bool(enabled)
-        if enabled == self.layout_mode:
-            return
-        self.layout_mode = enabled
-        self._dragging = False
-        self._drag_game_rect = None
-        if enabled:
-            self._layout_return_mode = self.return_mode if self.mode == "selector" else self.mode
-            self.mode = "map"
-            self.return_mode = "map"
-            self.selector.withdraw()
-        else:
-            self.mode = self._layout_return_mode
-            self.return_mode = self._layout_return_mode
-        self.map_canvas.configure(cursor="fleur" if enabled else "")
-        self._map_signature = None
-        self._apply_window_style(self.map_window, transparent=not enabled, force=True)
-        self.refresh()
-
-    def toggle_selector(self) -> None:
-        if self.layout_mode:
-            return
-        snapshot = self.engine.snapshot()
-        if not snapshot.config.route_enabled or not snapshot.target_active:
-            return
-        if self.mode == "selector":
-            self.mode = self.return_mode
-        else:
-            self.return_mode = self.mode if self.mode == "map" else "hidden"
-            self.mode = "selector"
-        self.refresh()
-
-    def refresh(self) -> None:
-        snapshot = self.engine.snapshot()
-        config = snapshot.config
-        if config.route_last_selected in WORM_ROUTE_MAP_BY_ID and config.route_last_selected != self.selected_id:
-            self.selected_id = config.route_last_selected
-            self._selector_signature = None
-            self._map_signature = None
-
-        if not config.route_enabled and not self.layout_mode:
-            self.mode = "hidden"
-            self.return_mode = "hidden"
-            self._withdraw_all()
-            return
-        if not snapshot.target_active and not self.layout_mode:
-            if self.mode == "selector":
-                self.mode = self.return_mode
-            self._withdraw_all()
-            return
-
-        rect = rect_from_tuple(snapshot.target_window_rect) or self._game_rect
-        if rect is None:
-            self._withdraw_all()
-            return
-        if snapshot.target_window_rect is not None:
-            self._game_rect = copy_window_rect(rect)
-        if self.mode == "selector":
-            self.map_window.withdraw()
-            self._show_selector(rect, config)
-        elif self.mode == "map":
-            self.selector.withdraw()
-            self._show_map(rect, config)
-        else:
-            self._withdraw_all()
-
-    def _show_selector(self, rect: wintypes.RECT, config: Config) -> None:
-        available_width = max(rect.right - rect.left, 800)
-        available_height = max(rect.bottom - rect.top, 600)
-        width = min(1120, max(760, available_width - 80))
-        margin = 16
-        gap = 10
-        header_height = 46
-        tile_width = (width - margin * 2 - gap * 3) // 4
-        image_height = min(158, max(92, int(tile_width * 0.58)))
-        tile_height = image_height + 34
-        height = header_height + margin + tile_height * 3 + gap * 2 + margin
-        if height > available_height - 50:
-            image_height = max(72, image_height - (height - available_height + 50) // 3)
-            tile_height = image_height + 32
-            height = header_height + margin + tile_height * 3 + gap * 2 + margin
-
-        x = rect.left + (available_width - width) // 2
-        y = rect.top + max(20, (available_height - height) // 2)
-        trigger_text = trigger_id_to_label(config.route_trigger)
-        signature = (width, height, tile_width, image_height, self.selected_id, trigger_text)
-        if signature != self._selector_signature:
-            self._draw_selector(width, height, tile_width, image_height, margin, gap, header_height, trigger_text)
-            self._selector_signature = signature
-        self.selector.geometry(window_geometry(width, height, x, y))
-        if self.selector.state() == "withdrawn":
-            self.selector.deiconify()
-            self._apply_window_style(self.selector, transparent=False)
-        self.selector.attributes("-topmost", True)
-
-    def _draw_selector(
-        self,
-        width: int,
-        height: int,
-        tile_width: int,
-        image_height: int,
-        margin: int,
-        gap: int,
-        header_height: int,
-        trigger_text: str,
-    ) -> None:
-        canvas = self.selector_canvas
-        canvas.configure(width=width, height=height)
-        canvas.delete("all")
-        canvas.create_rectangle(0, 0, width, height, fill="#111111", outline="#4b5563")
-        canvas.create_text(
-            margin,
-            14,
-            text="地狱蠕虫线路图",
-            fill="#f4f4f5",
-            font=("Microsoft YaHei UI", 13, "bold"),
-            anchor="nw",
-        )
-        canvas.create_text(
-            width - margin,
-            16,
-            text=f"选择地区 · {trigger_text} 返回",
-            fill="#a1a1aa",
-            font=("Microsoft YaHei UI", 9),
-            anchor="ne",
-        )
-        self._selector_hitboxes = []
-        self._selector_images = []
-        entries: list[WormRouteMap | None] = [*WORM_ROUTE_MAPS, None]
-        for index, route in enumerate(entries):
-            row, column = divmod(index, 4)
-            left = margin + column * (tile_width + gap)
-            top = header_height + margin + row * (image_height + 34 + gap)
-            right = left + tile_width
-            bottom = top + image_height + 34
-            route_id = route.id if route is not None else "close"
-            self._selector_hitboxes.append((left, top, right, bottom, route_id))
-            selected = route is not None and route.id == self.selected_id
-            fill = "#1f2937" if selected else "#18181b"
-            outline = "#f59e0b" if selected else "#3f3f46"
-            canvas.create_rectangle(left, top, right, bottom, fill=fill, outline=outline, width=2 if selected else 1)
-            if route is None:
-                center_x = (left + right) // 2
-                center_y = top + image_height // 2
-                canvas.create_oval(center_x - 22, center_y - 22, center_x + 22, center_y + 22, outline="#71717a", width=2)
-                canvas.create_line(center_x - 10, center_y - 10, center_x + 10, center_y + 10, fill="#a1a1aa", width=3)
-                canvas.create_line(center_x + 10, center_y - 10, center_x - 10, center_y + 10, fill="#a1a1aa", width=3)
-                label = "关闭线路图"
-            else:
-                photo = self._load_photo(route.thumbnail_path, tile_width - 8, image_height - 8)
-                if photo is not None:
-                    self._selector_images.append(photo)
-                    canvas.create_image((left + right) // 2, top + image_height // 2, image=photo, anchor="center")
-                label = f"{route.id}  {route.name}"
-            canvas.create_text(
-                (left + right) // 2,
-                bottom - 17,
-                text=label,
-                fill="#fafafa" if selected else "#d4d4d8",
-                font=("Microsoft YaHei UI", 9, "bold" if selected else "normal"),
-                anchor="center",
-            )
-        canvas.update_idletasks()
-
-    def _show_map(self, rect: wintypes.RECT, config: Config) -> None:
-        route = WORM_ROUTE_MAP_BY_ID.get(self.selected_id)
-        if route is None or not route.image_path.exists():
-            self.mode = "hidden"
-            self.map_window.withdraw()
-            return
-        available_width = max(rect.right - rect.left, 800)
-        available_height = max(rect.bottom - rect.top, 600)
-        width_ratio = {"small": 0.34, "medium": 0.46, "large": 0.60}.get(config.route_size, 0.46)
-        height_ratio = {"small": 0.62, "medium": 0.76, "large": 0.88}.get(config.route_size, 0.76)
-        max_image_width = max(360, int(available_width * width_ratio))
-        max_image_height = max(320, int(available_height * height_ratio) - 34)
-        trigger_text = trigger_id_to_label(config.route_trigger)
-        layout_text = trigger_id_to_label(config.overlay_layout_trigger)
-        signature = (route.id, max_image_width, max_image_height, trigger_text, self.layout_mode, layout_text)
-        if signature != self._map_signature:
-            photo = self._load_photo(route.image_path, max_image_width, max_image_height)
-            if photo is None:
-                self.mode = "hidden"
-                self.map_window.withdraw()
-                return
-            self._map_image = photo
-            self._map_signature = signature
-            width = photo.width()
-            height = photo.height() + 34
-            self.map_canvas.configure(width=width, height=height)
-            self.map_canvas.delete("all")
-            border_color = "#f59e0b" if self.layout_mode else "#52525b"
-            self.map_canvas.create_rectangle(0, 0, width, 34, fill="#111111", outline="")
-            self.map_canvas.create_text(
-                12,
-                9,
-                text="拖动线路图浮层" if self.layout_mode else f"地狱蠕虫路线 · {route.name}",
-                fill="#fbbf24" if self.layout_mode else "#f4f4f5",
-                font=("Microsoft YaHei UI", 10, "bold"),
-                anchor="nw",
-            )
-            self.map_canvas.create_text(
-                width - 12,
-                10,
-                text=f"{layout_text} 完成" if self.layout_mode else f"{trigger_text} 切换",
-                fill="#a1a1aa",
-                font=("Microsoft YaHei UI", 8),
-                anchor="ne",
-            )
-            self.map_canvas.create_image(0, 34, image=photo, anchor="nw")
-            self.map_canvas.create_rectangle(
-                1, 1, width - 2, height - 2,
-                outline=border_color,
-                width=3 if self.layout_mode else 1,
-            )
-            self.map_canvas.update_idletasks()
-        if self._map_image is None:
-            return
-        width = self._map_image.width()
-        height = self._map_image.height() + 34
-        desired_x = rect.left + config.route_x
-        desired_y = rect.top + config.route_y
-        x, y = clamp_to_virtual_desktop(desired_x, desired_y, width, height)
-        geometry = window_geometry(width, height, x, y)
-        if not self._dragging:
-            self.map_window.geometry(geometry)
-        self._game_rect = rect
-        self.map_window.attributes("-alpha", clamp(config.route_opacity, 0.4, 1.0))
-        if self.map_window.state() == "withdrawn":
-            self.map_window.deiconify()
-            self._apply_window_style(self.map_window, transparent=not self.layout_mode, force=True)
-        self.map_window.attributes("-topmost", True)
-
-    def _on_selector_click(self, event: tk.Event) -> None:
-        for left, top, right, bottom, route_id in self._selector_hitboxes:
-            if left <= event.x <= right and top <= event.y <= bottom:
-                if route_id == "close":
-                    self.mode = "hidden"
-                    self.return_mode = "hidden"
-                elif route_id in WORM_ROUTE_MAP_BY_ID:
-                    self.selected_id = route_id
-                    self.mode = "map"
-                    self.return_mode = "map"
-                    self._selector_signature = None
-                    self._map_signature = None
-                    if self.selection_callback is not None:
-                        self.selection_callback(route_id)
-                self.refresh()
-                return
-
-    def _on_drag_start(self, event: tk.Event) -> None:
-        if not self.layout_mode:
-            return
-        self._dragging = True
-        self._drag_offset = (int(event.x), int(event.y))
-        self._drag_game_rect = copy_window_rect(self._game_rect)
-
-    def _on_drag_motion(self, event: tk.Event) -> None:
-        if not self.layout_mode or not self._dragging:
-            return
-        width = self.map_window.winfo_width()
-        height = self.map_window.winfo_height()
-        x = int(event.x_root) - self._drag_offset[0]
-        y = int(event.y_root) - self._drag_offset[1]
-        x, y = clamp_to_virtual_desktop(x, y, width, height)
-        self.map_window.geometry(window_geometry(width, height, x, y))
-
-    def _on_drag_end(self, _event: tk.Event) -> None:
-        if not self.layout_mode or not self._dragging:
-            return
-        self._dragging = False
-        rect = self._drag_game_rect or self._game_rect
-        self._drag_game_rect = None
-        if rect is None:
-            return
-        self.map_window.update_idletasks()
-        relative_x = int(clamp(self.map_window.winfo_x() - rect.left, -5000, 5000))
-        relative_y = int(clamp(self.map_window.winfo_y() - rect.top, -5000, 5000))
-        if self.position_callback is not None:
-            self.position_callback(relative_x, relative_y)
-
-    def _load_photo(self, path: Path, max_width: int, max_height: int) -> object | None:
-        if Image is None or ImageTk is None or not path.exists():
-            return None
-        try:
-            with Image.open(path) as source:
-                image = source.convert("RGB")
-                image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
-                return ImageTk.PhotoImage(image)
-        except Exception:
-            return None
-
-    def _apply_window_style(self, window: tk.Toplevel, transparent: bool, force: bool = False) -> None:
-        if not force and window is self.selector and self._selector_style_applied:
-            return
-        if not force and window is self.map_window and self._map_style_applied:
-            return
-        try:
-            window.update_idletasks()
-            hwnd = window.winfo_id()
-            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            style |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
-            if transparent:
-                style |= WS_EX_TRANSPARENT
-            else:
-                style &= ~WS_EX_TRANSPARENT
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-            user32.SetWindowPos(
-                hwnd,
-                HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-            )
-            if window is self.selector:
-                self._selector_style_applied = True
-            else:
-                self._map_style_applied = True
-        except tk.TclError:
-            pass
-
-    def _withdraw_all(self) -> None:
-        self.selector.withdraw()
-        self.map_window.withdraw()
-
-
 class ConfigWindow:
     def __init__(self, root: tk.Tk, engine: MacroEngine, command_queue: queue.Queue[object], config_path: Path) -> None:
         self.root = root
@@ -2111,8 +1555,6 @@ class ConfigWindow:
         self.title_var = tk.StringVar()
         self.process_var = tk.StringVar()
         self.overlay_enabled_var = tk.BooleanVar()
-        self.overlay_x_var = tk.IntVar()
-        self.overlay_y_var = tk.IntVar()
         self.overlay_opacity_var = tk.DoubleVar()
         self.overlay_opacity_text_var = tk.StringVar()
         self.overlay_avoid_mouse_var = tk.BooleanVar()
@@ -2121,15 +1563,6 @@ class ConfigWindow:
         self.recording_countdown_var = tk.IntVar()
         self.recording_max_seconds_var = tk.IntVar()
         self.recording_hint_var = tk.StringVar()
-        self.route_enabled_var = tk.BooleanVar()
-        self.route_trigger_var = tk.StringVar()
-        self.overlay_layout_trigger_var = tk.StringVar()
-        self.overlay_layout_hint_var = tk.StringVar()
-        self.route_x_var = tk.IntVar()
-        self.route_y_var = tk.IntVar()
-        self.route_size_var = tk.StringVar()
-        self.route_opacity_var = tk.DoubleVar()
-        self.route_opacity_text_var = tk.StringVar()
         self.status_var = tk.StringVar()
         self.version_status_var = tk.StringVar(value=f"当前版本：v{APP_VERSION}")
         self.latest_release_url = GITHUB_RELEASES_URL
@@ -2146,9 +1579,7 @@ class ConfigWindow:
         self._build()
         self.load_from_engine()
         self.overlay_opacity_var.trace_add("write", lambda *_args: self._update_opacity_text())
-        self.route_opacity_var.trace_add("write", lambda *_args: self._update_route_opacity_text())
         self.recording_trigger_var.trace_add("write", lambda *_args: self._update_recording_hint())
-        self.overlay_layout_trigger_var.trace_add("write", lambda *_args: self._update_overlay_layout_hint())
         self._fit_to_content()
 
     def _help_label(self, parent: tk.Widget, text: str) -> ttk.Label:
@@ -2213,7 +1644,7 @@ class ConfigWindow:
         summary.columnconfigure(0, weight=1)
         self._help_label(
             summary,
-            "默认只在暗黑4窗口前台时生效。浮层位置可在游戏内直接拖动调整，窗口匹配位于“高级设置”。",
+            "默认只在暗黑4窗口前台时生效。状态浮层固定在游戏窗口左上方，鼠标接近时会自动避让。",
         ).grid(row=0, column=0, sticky="w", **pad)
         ttk.Checkbutton(summary, text="显示游戏内浮层", variable=self.overlay_enabled_var).grid(row=0, column=1, sticky="e", padx=(12, 5), pady=4)
 
@@ -2232,42 +1663,10 @@ class ConfigWindow:
 
         lower = ttk.Frame(main)
         lower.pack(fill="x")
-        lower.columnconfigure(0, weight=3, uniform="main_bottom")
-        lower.columnconfigure(1, weight=2, uniform="main_bottom")
-
-        routes = ttk.LabelFrame(lower, text="地狱蠕虫线路图")
-        routes.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        routes.columnconfigure(0, weight=1)
-        ttk.Label(
-            routes,
-            text="使用线路图快捷键选择地区；进入布局模式后可直接拖动状态浮层和线路图。",
-            foreground="#666666",
-        ).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 2))
-        route_options = ttk.Frame(routes)
-        route_options.grid(row=1, column=0, sticky="ew", padx=5, pady=(2, 6))
-        route_options.columnconfigure(2, weight=1)
-        ttk.Checkbutton(route_options, text="启用", variable=self.route_enabled_var).grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Label(route_options, text="选择器键").grid(row=0, column=1, sticky="w")
-        self._key_picker(route_options, 0, 2, self.route_trigger_var, "trigger", 7)
-        ttk.Label(route_options, text="大小").grid(row=0, column=3, sticky="w", padx=(8, 3))
-        ttk.Combobox(route_options, textvariable=self.route_size_var, values=list(ROUTE_SIZE_LABELS.values()), state="readonly", width=3).grid(row=0, column=4, sticky="w")
-        ttk.Label(route_options, text="透明度").grid(row=0, column=5, sticky="w", padx=(8, 3))
-        route_opacity = ttk.Frame(route_options)
-        route_opacity.grid(row=0, column=6, sticky="w")
-        ttk.Scale(route_opacity, from_=0.4, to=1.0, variable=self.route_opacity_var, orient="horizontal", length=90).pack(side="left")
-        ttk.Label(route_opacity, textvariable=self.route_opacity_text_var, width=5).pack(side="left", padx=(4, 0))
-        ttk.Label(route_options, text="浮层位置").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(
-            route_options,
-            textvariable=self.overlay_layout_hint_var,
-            foreground="#666666",
-        ).grid(row=1, column=1, columnspan=5, sticky="w", padx=(6, 8), pady=(6, 0))
-        ttk.Button(route_options, text="重置浮层位置", command=self.reset_overlay_positions).grid(
-            row=1, column=6, sticky="e", pady=(6, 0)
-        )
+        lower.columnconfigure(0, weight=1)
 
         support = ttk.LabelFrame(lower, text="支持与反馈")
-        support.grid(row=0, column=1, sticky="nsew")
+        support.grid(row=0, column=0, sticky="nsew")
         support.columnconfigure(0, weight=1)
         support_text = ttk.Frame(support)
         support_text.grid(row=0, column=0, sticky="nsew", padx=(10, 6), pady=8)
@@ -2653,66 +2052,22 @@ class ConfigWindow:
         self.set_macro_rows(normalize_macros(config.macros))
         self.set_toggle_profile_rows(normalize_toggle_profiles(config.toggle_profiles, normalize_macros(config.macros)))
         self.overlay_enabled_var.set(config.overlay_enabled)
-        self.overlay_x_var.set(config.overlay_x)
-        self.overlay_y_var.set(config.overlay_y)
         self.overlay_opacity_var.set(config.overlay_opacity)
         self.overlay_avoid_mouse_var.set(config.overlay_avoid_mouse)
         self.overlay_avoid_distance_var.set(config.overlay_avoid_distance)
         self.recording_trigger_var.set(optional_trigger_id_to_label(config.recording_trigger))
         self.recording_countdown_var.set(config.recording_countdown_sec)
         self.recording_max_seconds_var.set(config.recording_max_seconds)
-        self.route_enabled_var.set(config.route_enabled)
-        self.route_trigger_var.set(trigger_id_to_label(config.route_trigger))
-        self.overlay_layout_trigger_var.set(trigger_id_to_label(config.overlay_layout_trigger))
-        self.route_x_var.set(config.route_x)
-        self.route_y_var.set(config.route_y)
-        self.route_size_var.set(ROUTE_SIZE_LABELS.get(config.route_size, "中"))
-        self.route_opacity_var.set(config.route_opacity)
         self._update_opacity_text()
-        self._update_route_opacity_text()
         self._update_recording_hint()
-        self._update_overlay_layout_hint()
         self._fit_to_content()
 
     def _update_opacity_text(self) -> None:
         self.overlay_opacity_text_var.set(f"{int(float(self.overlay_opacity_var.get()) * 100)}%")
 
-    def _update_route_opacity_text(self) -> None:
-        self.route_opacity_text_var.set(f"{int(float(self.route_opacity_var.get()) * 100)}%")
-
     def _update_recording_hint(self) -> None:
         trigger_text = str(self.recording_trigger_var.get()).strip() or "未设置"
         self.recording_hint_var.set(f"在游戏中使用 {trigger_text} 录制宏")
-
-    def _update_overlay_layout_hint(self) -> None:
-        trigger_text = str(self.overlay_layout_trigger_var.get()).strip() or "未设置"
-        self.overlay_layout_hint_var.set(f"游戏内按 {trigger_text} 进入布局模式，拖动浮层，松开即保存")
-
-    def update_overlay_position_fields(self, overlay_name: str, x: int, y: int) -> None:
-        if overlay_name == "status":
-            self.overlay_x_var.set(x)
-            self.overlay_y_var.set(y)
-        elif overlay_name == "route":
-            self.route_x_var.set(x)
-            self.route_y_var.set(y)
-
-    def reset_overlay_positions(self) -> None:
-        self.overlay_x_var.set(20)
-        self.overlay_y_var.set(20)
-        self.route_x_var.set(DEFAULT_ROUTE_X)
-        self.route_y_var.set(DEFAULT_ROUTE_Y)
-        try:
-            config = self.engine.snapshot().config
-            config.overlay_x = 20
-            config.overlay_y = 20
-            config.route_x = DEFAULT_ROUTE_X
-            config.route_y = DEFAULT_ROUTE_Y
-            validate_config(config)
-            save_config(self.config_path, config)
-            self.engine.update_config(config)
-            self.status_var.set("已重置并保存浮层位置")
-        except Exception as exc:
-            messagebox.showerror(APP_NAME, str(exc), parent=self.window)
 
     def show_advanced_settings(self) -> None:
         if self.advanced_window is not None and self.advanced_window.winfo_exists():
@@ -2748,26 +2103,17 @@ class ConfigWindow:
         overlay = ttk.LabelFrame(main, text="浮层设置")
         overlay.pack(fill="x", pady=(0, 8))
         overlay.columnconfigure(1, weight=1)
-        self._help_label(overlay, "用于调整游戏内浮层显示和布局快捷键，修改后点击“保存并应用”。").grid(row=0, column=0, columnspan=2, sticky="w", **pad)
+        self._help_label(overlay, "调整状态浮层的显示、透明度和鼠标躲避；位置固定在游戏窗口左上方。").grid(row=0, column=0, columnspan=2, sticky="w", **pad)
         ttk.Checkbutton(overlay, text="显示游戏内浮层", variable=self.overlay_enabled_var).grid(row=1, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 6))
-        ttk.Label(overlay, text="布局快捷键").grid(row=2, column=0, sticky="w", **pad)
-        layout_shortcut = ttk.Frame(overlay)
-        layout_shortcut.grid(row=2, column=1, sticky="ew", **pad)
-        self._key_picker(layout_shortcut, 0, 0, self.overlay_layout_trigger_var, "trigger", 8)
-        ttk.Label(
-            layout_shortcut,
-            textvariable=self.overlay_layout_hint_var,
-            foreground="#666666",
-        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
-        ttk.Label(overlay, text="透明度").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Label(overlay, text="透明度").grid(row=2, column=0, sticky="w", **pad)
         opacity_row = ttk.Frame(overlay)
-        opacity_row.grid(row=3, column=1, sticky="ew", **pad)
+        opacity_row.grid(row=2, column=1, sticky="ew", **pad)
         opacity_row.columnconfigure(0, weight=1)
         ttk.Scale(opacity_row, from_=0.2, to=1.0, variable=self.overlay_opacity_var, orient="horizontal").grid(row=0, column=0, sticky="ew")
         ttk.Label(opacity_row, textvariable=self.overlay_opacity_text_var, width=6).grid(row=0, column=1, padx=(8, 0))
-        ttk.Checkbutton(overlay, text="鼠标接近时自动躲避", variable=self.overlay_avoid_mouse_var).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 2))
+        ttk.Checkbutton(overlay, text="鼠标接近时自动躲避", variable=self.overlay_avoid_mouse_var).grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 2))
         avoid_distance = ttk.Frame(overlay)
-        avoid_distance.grid(row=5, column=0, columnspan=2, sticky="w", **pad)
+        avoid_distance.grid(row=4, column=0, columnspan=2, sticky="w", **pad)
         ttk.Label(avoid_distance, text="躲避距离").pack(side="left")
         ttk.Spinbox(
             avoid_distance,
@@ -2868,22 +2214,12 @@ class ConfigWindow:
                 toggle_profiles=toggle_profiles,
                 poll_interval_ms=DEFAULT_POLL_INTERVAL_MS,
                 overlay_enabled=bool(self.overlay_enabled_var.get()),
-                overlay_x=int(self.overlay_x_var.get()),
-                overlay_y=int(self.overlay_y_var.get()),
                 overlay_opacity=float(self.overlay_opacity_var.get()),
                 overlay_avoid_mouse=bool(self.overlay_avoid_mouse_var.get()),
                 overlay_avoid_distance=int(self.overlay_avoid_distance_var.get()),
                 recording_trigger=optional_trigger_label_to_id(str(self.recording_trigger_var.get()).strip()),
                 recording_countdown_sec=int(self.recording_countdown_var.get()),
                 recording_max_seconds=int(self.recording_max_seconds_var.get()),
-                route_enabled=bool(self.route_enabled_var.get()),
-                route_trigger=trigger_label_to_id(str(self.route_trigger_var.get()).strip()),
-                overlay_layout_trigger=trigger_label_to_id(str(self.overlay_layout_trigger_var.get()).strip()),
-                route_x=int(self.route_x_var.get()),
-                route_y=int(self.route_y_var.get()),
-                route_size=next((key for key, label in ROUTE_SIZE_LABELS.items() if label == self.route_size_var.get()), "medium"),
-                route_opacity=float(self.route_opacity_var.get()),
-                route_last_selected=self.engine.snapshot().config.route_last_selected,
             )
             validate_config(config)
             save_config(self.config_path, config)
@@ -3303,22 +2639,12 @@ def normalize_config(config: Config) -> Config:
         toggle_profiles=normalize_toggle_profiles(config.toggle_profiles, macros),
         poll_interval_ms=DEFAULT_POLL_INTERVAL_MS,
         overlay_enabled=bool(config.overlay_enabled),
-        overlay_x=int(config.overlay_x),
-        overlay_y=int(config.overlay_y),
         overlay_opacity=float(config.overlay_opacity),
         overlay_avoid_mouse=bool(config.overlay_avoid_mouse),
         overlay_avoid_distance=int(config.overlay_avoid_distance),
         recording_trigger=optional_trigger_label_to_id(str(config.recording_trigger)),
         recording_countdown_sec=max(int(config.recording_countdown_sec), 0),
         recording_max_seconds=max(int(config.recording_max_seconds), 1),
-        route_enabled=bool(config.route_enabled),
-        route_trigger=trigger_label_to_id(str(config.route_trigger)),
-        overlay_layout_trigger=trigger_label_to_id(str(config.overlay_layout_trigger)),
-        route_x=int(config.route_x),
-        route_y=int(config.route_y),
-        route_size=str(config.route_size) if str(config.route_size) in ROUTE_SIZE_LABELS else "medium",
-        route_opacity=clamp(float(config.route_opacity), 0.4, 1.0),
-        route_last_selected=str(config.route_last_selected) if str(config.route_last_selected) in WORM_ROUTE_MAP_BY_ID else WORM_ROUTE_MAPS[0].id,
     )
 
 
@@ -3337,22 +2663,12 @@ def clone_config(config: Config) -> Config:
         ],
         poll_interval_ms=normalized.poll_interval_ms,
         overlay_enabled=normalized.overlay_enabled,
-        overlay_x=normalized.overlay_x,
-        overlay_y=normalized.overlay_y,
         overlay_opacity=normalized.overlay_opacity,
         overlay_avoid_mouse=normalized.overlay_avoid_mouse,
         overlay_avoid_distance=normalized.overlay_avoid_distance,
         recording_trigger=normalized.recording_trigger,
         recording_countdown_sec=normalized.recording_countdown_sec,
         recording_max_seconds=normalized.recording_max_seconds,
-        route_enabled=normalized.route_enabled,
-        route_trigger=normalized.route_trigger,
-        overlay_layout_trigger=normalized.overlay_layout_trigger,
-        route_x=normalized.route_x,
-        route_y=normalized.route_y,
-        route_size=normalized.route_size,
-        route_opacity=normalized.route_opacity,
-        route_last_selected=normalized.route_last_selected,
     )
 
 
@@ -3552,9 +2868,6 @@ def load_config(path: Path) -> Config:
     raw = json.loads(path.read_text(encoding="utf-8"))
     macros = parse_macros(raw)
     toggle_profiles = parse_toggle_profiles(raw, macros)
-    legacy_route_position = str(raw.get("route_position", "right")).strip()
-    legacy_route_x = {"left": 24, "center": 600, "right": DEFAULT_ROUTE_X}.get(legacy_route_position, DEFAULT_ROUTE_X)
-
     config = Config(
         window_title_contains=str(raw.get("window_title_contains", "")).strip(),
         process_name=str(raw.get("process_name", "")).strip(),
@@ -3562,22 +2875,12 @@ def load_config(path: Path) -> Config:
         toggle_profiles=toggle_profiles,
         poll_interval_ms=DEFAULT_POLL_INTERVAL_MS,
         overlay_enabled=bool(raw.get("overlay_enabled", True)),
-        overlay_x=int(raw.get("overlay_x", 20)),
-        overlay_y=int(raw.get("overlay_y", 20)),
         overlay_opacity=float(raw.get("overlay_opacity", DEFAULT_OVERLAY_OPACITY)),
         overlay_avoid_mouse=bool(raw.get("overlay_avoid_mouse", DEFAULT_OVERLAY_AVOID_MOUSE)),
         overlay_avoid_distance=int(raw.get("overlay_avoid_distance", DEFAULT_OVERLAY_AVOID_DISTANCE)),
         recording_trigger=str(raw.get("recording_trigger", DEFAULT_RECORD_TRIGGER)).strip(),
         recording_countdown_sec=int(raw.get("recording_countdown_sec", DEFAULT_RECORD_COUNTDOWN_SEC)),
         recording_max_seconds=int(raw.get("recording_max_seconds", DEFAULT_RECORD_MAX_SECONDS)),
-        route_enabled=bool(raw.get("route_enabled", True)),
-        route_trigger=str(raw.get("route_trigger", DEFAULT_ROUTE_TRIGGER)).strip(),
-        overlay_layout_trigger=str(raw.get("overlay_layout_trigger", DEFAULT_OVERLAY_LAYOUT_TRIGGER)).strip(),
-        route_x=int(raw.get("route_x", legacy_route_x)),
-        route_y=int(raw.get("route_y", DEFAULT_ROUTE_Y)),
-        route_size=str(raw.get("route_size", "medium")).strip(),
-        route_opacity=float(raw.get("route_opacity", DEFAULT_ROUTE_OPACITY)),
-        route_last_selected=str(raw.get("route_last_selected", WORM_ROUTE_MAPS[0].id)).strip(),
     )
 
     validate_config(config)
@@ -3630,30 +2933,8 @@ def validate_config(config: Config) -> None:
         raise ValueError("录制快捷键无效。")
     if config.recording_trigger != "none" and config.recording_trigger in seen:
         raise ValueError(f"宏录制不能和 {seen[config.recording_trigger]} 使用同一个按键：{trigger_id_to_label(config.recording_trigger)}。")
-    if config.route_trigger not in TRIGGER_KEYS:
-        raise ValueError("线路图快捷键无效。")
-    if config.route_enabled and config.route_trigger in seen:
-        raise ValueError(f"线路图不能和 {seen[config.route_trigger]} 使用同一个按键：{trigger_id_to_label(config.route_trigger)}。")
-    if config.route_enabled and config.route_trigger == config.recording_trigger:
-        raise ValueError(f"线路图不能和宏录制使用同一个按键：{trigger_id_to_label(config.route_trigger)}。")
-    if config.overlay_layout_trigger not in TRIGGER_KEYS:
-        raise ValueError("浮层调整快捷键无效。")
-    if config.overlay_layout_trigger in seen:
-        raise ValueError(f"浮层调整不能和 {seen[config.overlay_layout_trigger]} 使用同一个按键：{trigger_id_to_label(config.overlay_layout_trigger)}。")
-    if config.overlay_layout_trigger == config.recording_trigger:
-        raise ValueError(f"浮层调整不能和宏录制使用同一个按键：{trigger_id_to_label(config.overlay_layout_trigger)}。")
-    if config.route_enabled and config.overlay_layout_trigger == config.route_trigger:
-        raise ValueError(f"浮层调整不能和线路图使用同一个按键：{trigger_id_to_label(config.overlay_layout_trigger)}。")
-    if not -5000 <= config.overlay_x <= 5000 or not -5000 <= config.overlay_y <= 5000:
-        raise ValueError("状态浮层坐标必须在 -5000 到 5000 之间。")
     if not MIN_OVERLAY_AVOID_DISTANCE <= config.overlay_avoid_distance <= MAX_OVERLAY_AVOID_DISTANCE:
         raise ValueError(f"浮层躲避距离必须在 {MIN_OVERLAY_AVOID_DISTANCE} 到 {MAX_OVERLAY_AVOID_DISTANCE} 像素之间。")
-    if not -5000 <= config.route_x <= 5000 or not -5000 <= config.route_y <= 5000:
-        raise ValueError("线路图坐标必须在 -5000 到 5000 之间。")
-    if config.route_size not in ROUTE_SIZE_LABELS:
-        raise ValueError("线路图大小无效。")
-    if not 0.4 <= config.route_opacity <= 1.0:
-        raise ValueError("线路图透明度必须在 40% 到 100% 之间。")
     if config.poll_interval_ms < 50:
         raise ValueError("轮询间隔不能小于 50ms。")
     if config.recording_countdown_sec < 0:
@@ -3780,12 +3061,6 @@ def copy_window_rect(rect: wintypes.RECT | None) -> wintypes.RECT | None:
     return rect_from_tuple(rect_to_tuple(rect)) if rect is not None else None
 
 
-def root_window_handle(hwnd: int) -> int:
-    if not hwnd:
-        return 0
-    return int(user32.GetAncestor(wintypes.HWND(hwnd), GA_ROOT) or hwnd)
-
-
 def create_tray_icon(command_queue: queue.Queue[object]) -> object | None:
     if pystray is None or Image is None or ImageDraw is None:
         return None
@@ -3824,46 +3099,7 @@ def run_gui(config: Config, config_path: Path) -> int:
     root = tk.Tk()
     app = ConfigWindow(root, engine, command_queue, config_path)
 
-    def persist_overlay_position(overlay_name: str, x: int, y: int) -> None:
-        try:
-            updated_config = engine.update_overlay_position(overlay_name, x, y)
-            save_config(config_path, updated_config)
-            app.update_overlay_position_fields(overlay_name, x, y)
-            app.status_var.set(f"已保存{'状态浮层' if overlay_name == 'status' else '线路图浮层'}位置：X {x} / Y {y}")
-        except Exception as exc:
-            app.status_var.set(f"保存浮层位置失败：{exc}")
-
-    overlay = OverlayWindow(
-        root,
-        engine,
-        lambda x, y: persist_overlay_position("status", x, y),
-    )
-
-    def persist_route_selection(route_id: str) -> None:
-        try:
-            updated_config = engine.update_route_selection(route_id)
-            save_config(config_path, updated_config)
-        except Exception as exc:
-            app.status_var.set(f"保存线路图选择失败：{exc}")
-
-    route_overlay = WormRouteOverlay(
-        root,
-        engine,
-        persist_route_selection,
-        lambda x, y: persist_overlay_position("route", x, y),
-    )
-    layout_mode = False
-
-    def set_layout_mode(enabled: bool) -> None:
-        nonlocal layout_mode
-        enabled = bool(enabled)
-        if layout_mode == enabled:
-            return
-        layout_mode = enabled
-        engine.set_overlay_layout_active(enabled)
-        overlay.set_layout_mode(enabled)
-        route_overlay.set_layout_mode(enabled)
-        app.status_var.set("浮层布局模式：拖动浮层，松开即保存" if enabled else "已退出浮层布局模式")
+    overlay = OverlayWindow(root, engine)
 
     tray_icon = create_tray_icon(command_queue)
     if tray_icon:
@@ -3888,11 +3124,6 @@ def run_gui(config: Config, config_path: Path) -> int:
                 command = command_queue.get_nowait()
                 if isinstance(command, dict) and command.get("type") == "recording_done":
                     root.after(0, lambda events=normalize_recording(command.get("events")): handle_recording_done(events))
-                elif isinstance(command, dict) and command.get("type") == "overlay_layout_toggle":
-                    set_layout_mode(not layout_mode)
-                elif isinstance(command, dict) and command.get("type") == "route_toggle":
-                    set_layout_mode(False)
-                    route_overlay.toggle_selector()
                 elif isinstance(command, dict) and command.get("type") == "engine_error":
                     if command.get("released", False):
                         app.status_var.set(f"宏引擎已停止，输入已释放：{command.get('message', '未知错误')}")
@@ -3909,20 +3140,7 @@ def run_gui(config: Config, config_path: Path) -> int:
             app.status_var.set(f"处理后台命令失败：{exc}")
             app._reveal_window()
 
-        if layout_mode and not engine.snapshot().target_active:
-            foreground_root = root_window_handle(int(user32.GetForegroundWindow() or 0))
-            layout_roots = {
-                root_window_handle(overlay.window.winfo_id()),
-                root_window_handle(route_overlay.map_window.winfo_id()),
-            }
-            dragging = (
-                (overlay._dragging or route_overlay._dragging)
-                and is_key_down(0x01)
-            )
-            if foreground_root not in layout_roots and not dragging:
-                set_layout_mode(False)
         overlay.refresh()
-        route_overlay.refresh()
         root.after(50, tick)
 
     def handle_stop(_signum: int, _frame: object) -> None:

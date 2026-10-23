@@ -98,18 +98,8 @@
   ],
   "poll_interval_ms": 50,
   "overlay_enabled": true,
-  "overlay_x": 20,
-  "overlay_y": 20,
   "overlay_opacity": 0.6,
   "recording_trigger": "f12",
   "recording_countdown_sec": 3,
-  "recording_max_seconds": 30,
-  "route_enabled": true,
-  "route_trigger": "f11",
-  "overlay_layout_trigger": "f10",
-  "route_x": 1000,
-  "route_y": 120,
-  "route_size": "medium",
-  "route_opacity": 0.9,
-  "route_last_selected": "01"
+  "recording_max_seconds": 30
 }
