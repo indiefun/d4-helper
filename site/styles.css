@@ -43,6 +43,34 @@ a {
 img {
   display: block;
   max-width: 100%;
+  height: auto;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 4px;
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 20;
+  padding: 10px 16px;
+  background: var(--panel);
+  transform: translateY(-160%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+section[id] {
+  scroll-margin-top: 100px;
 }
 
 .topbar {
@@ -118,7 +146,7 @@ p {
 h1 {
   max-width: 760px;
   margin-bottom: 20px;
-  font-size: clamp(44px, 7vw, 78px);
+  font-size: clamp(40px, 5vw, 64px);
   line-height: 1.06;
   letter-spacing: 0;
   overflow-wrap: anywhere;
@@ -223,13 +251,76 @@ h3 {
   gap: 8px;
   padding: 14px;
   border-bottom: 1px solid var(--line);
+  justify-content: space-between;
+  align-items: center;
 }
 
 .panel-header span {
-  width: 10px;
-  height: 10px;
-  background: var(--soft);
-  border-radius: 50%;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.demo-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 16px 18px 0;
+}
+
+.demo-tabs button {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.demo-tabs button[aria-selected="true"] {
+  background: rgba(216, 168, 78, 0.13);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.demo-launch {
+  display: grid;
+  gap: 6px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.demo-launch span,
+.demo-caption,
+.hero-note,
+.section-note {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.demo-caption {
+  margin: 0;
+  padding: 0 18px 18px;
+}
+
+.hero-note {
+  margin: 18px 0 0;
+}
+
+.section-note {
+  margin: 20px 0 0;
+  padding-left: 16px;
+  border-left: 2px solid var(--gold);
+}
+
+.feature-number {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--gold);
+  font-size: 14px;
 }
 
 .macro-preview {
@@ -238,7 +329,7 @@ h3 {
 
 .macro-row {
   display: grid;
-  grid-template-columns: 86px 1fr 58px;
+  grid-template-columns: 44px minmax(0, 1fr) 68px;
   align-items: center;
   gap: 12px;
   min-height: 56px;
@@ -307,7 +398,7 @@ h3 {
 
 .shot-grid {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: minmax(0, 1fr) 300px;
   gap: 18px;
   align-items: start;
 }
@@ -324,6 +415,12 @@ figure {
 figure img {
   width: 100%;
   border-radius: 6px;
+}
+
+.overlay-shot img {
+  width: auto;
+  max-width: 100%;
+  margin: 12px auto;
 }
 
 figcaption {
@@ -366,12 +463,17 @@ figcaption {
 
 .details {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
 .detail-card {
   padding: 24px;
+}
+
+.detail-card h2 {
+  font-size: 26px;
+  margin-bottom: 24px;
 }
 
 .detail-card ul {
@@ -416,7 +518,44 @@ figcaption {
 }
 
 .donate {
-  margin-top: -42px;
+  margin-top: 0;
+}
+
+.download-actions {
+  flex-direction: column;
+  min-width: 210px;
+}
+
+code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.update-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+}
+
+.update-grid article {
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+}
+
+.update-grid article > p:last-child {
+  color: var(--muted);
+}
+
+.release-version {
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.release-version span {
+  margin-left: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .donate-copy {
@@ -488,7 +627,7 @@ figcaption {
 
   .nav {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     width: 100%;
     gap: 10px;
     font-size: 13px;
@@ -523,7 +662,7 @@ figcaption {
   }
 
   .macro-row {
-    grid-template-columns: 72px minmax(0, 1fr) 44px;
+    grid-template-columns: 32px minmax(0, 1fr) 68px;
     gap: 8px;
     padding: 10px;
   }
@@ -552,5 +691,24 @@ figcaption {
 
   .footer {
     flex-direction: column;
+  }
+
+  .update-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  section[id] {
+    scroll-margin-top: 130px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .button:hover {
+    transform: none;
   }
 }

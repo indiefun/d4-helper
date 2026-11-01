@@ -16,16 +16,7 @@ if (-not (Test-Path -LiteralPath $distConfigPath)) {
 } else {
     Write-Host "Preserving existing dist config: $distConfigPath"
 }
-Set-Content -LiteralPath .\dist\VERSION -Value $version -Encoding UTF8
-$portableDirectory = Join-Path $PSScriptRoot "dist\D4Helper-portable-v$version"
-New-Item -ItemType Directory -Path $portableDirectory -Force | Out-Null
-Copy-Item -LiteralPath .\dist\D4Helper.exe -Destination $portableDirectory -Force
-$portableConfigPath = Join-Path $portableDirectory "config.json"
-if (-not (Test-Path -LiteralPath $portableConfigPath)) {
-    Copy-Item -LiteralPath $distConfigPath -Destination $portableConfigPath
-} else {
-    Write-Host "Preserving existing portable config: $portableConfigPath"
-}
-Copy-Item -LiteralPath .\dist\VERSION -Destination $portableDirectory -Force
+[System.IO.File]::WriteAllText((Join-Path $PSScriptRoot 'dist\VERSION'), "$version`n", [System.Text.UTF8Encoding]::new($false))
 $portableArchive = Join-Path $PSScriptRoot "dist\D4Helper-portable-v$version.zip"
-Compress-Archive -Path (Join-Path $portableDirectory "*") -DestinationPath $portableArchive -CompressionLevel Optimal -Force
+Compress-Archive -LiteralPath .\dist\D4Helper.exe, $distConfigPath, .\dist\VERSION -DestinationPath $portableArchive -CompressionLevel Optimal -Force
+Copy-Item -LiteralPath $portableArchive -Destination .\dist\D4Helper-windows-latest.zip -Force

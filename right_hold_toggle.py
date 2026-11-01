@@ -17,7 +17,7 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 
 try:
     import pystray
@@ -62,7 +62,7 @@ BUNDLED_VERSION_PATH = resource_path("VERSION")
 def read_app_version() -> str:
     for path in (VERSION_PATH, BUNDLED_VERSION_PATH):
         try:
-            version = path.read_text(encoding="utf-8").strip()
+            version = path.read_text(encoding="utf-8-sig").strip()
             if version:
                 return version.lstrip("v")
         except OSError:
@@ -630,6 +630,14 @@ class ToggleProfile:
 
 
 @dataclass
+class ProfileConfig:
+    id: str
+    name: str
+    macros: list[MacroConfig]
+    toggle_profiles: list[ToggleProfile]
+
+
+@dataclass
 class Config:
     window_title_contains: str = DEFAULT_WINDOW_TITLE_CONTAINS
     process_name: str = DEFAULT_PROCESS_NAME
@@ -643,6 +651,8 @@ class Config:
     recording_trigger: str = DEFAULT_RECORD_TRIGGER
     recording_countdown_sec: int = DEFAULT_RECORD_COUNTDOWN_SEC
     recording_max_seconds: int = DEFAULT_RECORD_MAX_SECONDS
+    profiles: list[ProfileConfig] | None = None
+    active_profile_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -738,12 +748,12 @@ class MacroEngine:
                 self.native_kernel.configure(config.macros or [])
             self.release_all_inputs()
 
-    def snapshot(self) -> Snapshot:
+    def snapshot(self, include_profiles: bool = False) -> Snapshot:
         with self.lock:
             return Snapshot(
                 target_active=self.target_active,
                 macro_states={macro.id: macro.id in self.active_macros for macro in self.config.macros or []},
-                config=clone_config(self.config),
+                config=clone_config(self.config, include_profiles=include_profiles),
                 foreground_title=self.foreground_title,
                 foreground_process=self.foreground_process,
                 target_window_rect=self.target_window_rect,
@@ -771,7 +781,7 @@ class MacroEngine:
     def _run_loop(self) -> None:
         while self.running:
             with self.lock:
-                config = clone_config(self.config)
+                config = clone_config(self.config, include_profiles=False)
                 config_generation = self.config_generation
 
             hwnd, title, process = self._read_foreground_window()
@@ -781,7 +791,7 @@ class MacroEngine:
             release_inputs = False
             with self.lock:
                 if config_generation != self.config_generation:
-                    config = clone_config(self.config)
+                    config = clone_config(self.config, include_profiles=False)
                     target_active = foreground_matches_values(config, title, process)
                 was_target_active = self.target_active
                 self.target_active = target_active
@@ -1076,7 +1086,7 @@ class MacroEngine:
     def _finish_recording_locked(self) -> None:
         if self.recording_status == "recording" and self.event_queue is not None:
             recording = self._trim_recording(self.recorded_events) if self.recorded_events else []
-            self.event_queue.put({"type": "recording_done", "events": recording})
+            self.event_queue.put({"type": "recording_done", "events": recording, "profile_id": self.config.active_profile_id})
         self.recording_status = "idle"
         self.recording_countdown_until = 0.0
         self.recording_started_at = 0.0
@@ -1566,6 +1576,9 @@ class ConfigWindow:
         self.status_var = tk.StringVar()
         self.version_status_var = tk.StringVar(value=f"当前版本：v{APP_VERSION}")
         self.latest_release_url = GITHUB_RELEASES_URL
+        self.profiles: list[ProfileConfig] = []
+        self.active_profile_id = ""
+        self.profile_tab_var = tk.StringVar()
         self.macro_vars: list[dict[str, object]] = []
         self.macro_rows_container: ttk.Frame | None = None
         self.toggle_profile_vars: list[dict[str, object]] = []
@@ -1596,7 +1609,13 @@ class ConfigWindow:
             pass
 
     def _fit_to_content(self) -> None:
-        self._fit_window_to_content(self.window)
+        self.window.update_idletasks()
+        requested_width = max(self.window.winfo_reqwidth(), self.main_content.winfo_reqwidth() + 60)
+        requested_height = self.window.winfo_reqheight() - self.content_canvas.winfo_reqheight() + self.main_content.winfo_reqheight() + 10
+        width = min(requested_width, max(self.window.winfo_screenwidth() - 60, 320))
+        height = min(requested_height, max(self.window.winfo_screenheight() - 100, 240))
+        self.window.geometry(f"{width}x{height}")
+        self._update_content_scroll()
 
     def _fit_window_to_content(self, window: tk.Toplevel | tk.Tk) -> None:
         window.update_idletasks()
@@ -1611,7 +1630,7 @@ class ConfigWindow:
         settings_menu.add_command(label="高级设置", command=self.show_advanced_settings)
         settings_menu.add_command(label="读取当前窗口为目标", command=self.detect_foreground)
         settings_menu.add_separator()
-        settings_menu.add_command(label="恢复默认", command=self.defaults)
+        settings_menu.add_command(label="恢复当前 Profile 默认宏", command=self.defaults)
         settings_menu.add_command(label="隐藏到托盘", command=self.hide)
         menu.add_cascade(label="设置", menu=settings_menu)
 
@@ -1635,18 +1654,40 @@ class ConfigWindow:
         tk.Button(bottom, text="高级设置", command=self.show_advanced_settings, width=12, height=1).pack(side="right", padx=(8, 0))
         tk.Button(bottom, text="保存并应用", command=self.save, width=12, height=1).pack(side="right", padx=(8, 0))
 
-        main = ttk.Frame(self.window, padding=10)
-        main.pack(fill="both", expand=True)
-        main.columnconfigure(0, weight=1)
+        self._build_support_section()
 
-        summary = ttk.Frame(main)
-        summary.pack(fill="x", pady=(0, 8))
+        summary = ttk.LabelFrame(self.window, text="公共设置", padding=(5, 3))
+        summary.pack(fill="x", padx=10, pady=(8, 8))
         summary.columnconfigure(0, weight=1)
         self._help_label(
             summary,
             "默认只在暗黑4窗口前台时生效。状态浮层固定在游戏窗口左上方，鼠标接近时会自动避让。",
         ).grid(row=0, column=0, sticky="w", **pad)
         ttk.Checkbutton(summary, text="显示游戏内浮层", variable=self.overlay_enabled_var).grid(row=0, column=1, sticky="e", padx=(12, 5), pady=4)
+
+        self.profile_section = ttk.Frame(self.window, borderwidth=1, relief="groove")
+        self.profile_section.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+        self._build_profile_tabs()
+        ttk.Separator(self.profile_section, orient="horizontal").pack(fill="x", padx=10, pady=(4, 0))
+
+        content = ttk.Frame(self.profile_section)
+        content.pack(fill="both", expand=True)
+        self.content_canvas = tk.Canvas(content, highlightthickness=0, borderwidth=0)
+        self.content_canvas.grid(row=0, column=0, sticky="nsew")
+        vertical_scroll = ttk.Scrollbar(content, orient="vertical", command=self.content_canvas.yview)
+        vertical_scroll.grid(row=0, column=1, sticky="ns")
+        horizontal_scroll = ttk.Scrollbar(content, orient="horizontal", command=self.content_canvas.xview)
+        horizontal_scroll.grid(row=1, column=0, sticky="ew")
+        self.content_canvas.configure(yscrollcommand=vertical_scroll.set, xscrollcommand=horizontal_scroll.set)
+        content.rowconfigure(0, weight=1)
+        content.columnconfigure(0, weight=1)
+        main = ttk.Frame(self.content_canvas, padding=10)
+        self.main_content = main
+        self.content_window = self.content_canvas.create_window(0, 0, window=main, anchor="nw")
+        main.bind("<Configure>", self._update_content_scroll)
+        self.content_canvas.bind("<Configure>", self._update_content_scroll)
+        self.window.bind("<MouseWheel>", self._scroll_content)
+        main.columnconfigure(0, weight=1)
 
         macros = ttk.LabelFrame(main, text="宏配置")
         macros.pack(fill="x", pady=(0, 8))
@@ -1661,12 +1702,9 @@ class ConfigWindow:
         self.toggle_profiles_container.pack(fill="x", padx=5, pady=(6, 6))
         self._render_toggle_profile_rows()
 
-        lower = ttk.Frame(main)
-        lower.pack(fill="x")
-        lower.columnconfigure(0, weight=1)
-
-        support = ttk.LabelFrame(lower, text="支持与反馈")
-        support.grid(row=0, column=0, sticky="nsew")
+    def _build_support_section(self) -> None:
+        support = ttk.LabelFrame(self.window, text="支持与反馈")
+        support.pack(fill="x", side="bottom", padx=10, pady=(0, 8))
         support.columnconfigure(0, weight=1)
         support_text = ttk.Frame(support)
         support_text.grid(row=0, column=0, sticky="nsew", padx=(10, 6), pady=8)
@@ -1682,6 +1720,129 @@ class ConfigWindow:
         donate_label = self._donate_label(support, 112)
         if donate_label is not None:
             donate_label.grid(row=0, column=1, sticky="e", padx=(4, 8), pady=8)
+
+    def _build_profile_tabs(self) -> None:
+        bar = ttk.Frame(self.profile_section, padding=(10, 8, 10, 0))
+        bar.pack(fill="x")
+        ttk.Label(bar, text="Profile").pack(side="left", padx=(0, 10))
+        actions = ttk.Frame(bar)
+        actions.pack(side="right", padx=(10, 0))
+        ttk.Button(actions, text="新建", width=6, command=self.add_profile).pack(side="left")
+        ttk.Button(actions, text="重命名", width=7, command=self.rename_profile).pack(side="left", padx=5)
+        self.delete_profile_button = ttk.Button(actions, text="删除", width=6, command=self.remove_profile)
+        self.delete_profile_button.pack(side="left")
+
+        tabs = ttk.Frame(bar)
+        tabs.pack(side="left", fill="x", expand=True)
+        self.profile_canvas = tk.Canvas(tabs, height=34, width=400, highlightthickness=0)
+        self.profile_canvas.pack(fill="x", expand=True)
+        self.profile_tabs = ttk.Frame(self.profile_canvas)
+        self.profile_canvas.create_window(0, 0, window=self.profile_tabs, anchor="nw")
+        self.profile_scroll = ttk.Scrollbar(tabs, orient="horizontal", command=self.profile_canvas.xview)
+        self.profile_canvas.configure(xscrollcommand=self.profile_scroll.set)
+        self.profile_tabs.bind("<Configure>", self._update_profile_scroll)
+        self.profile_canvas.bind("<Configure>", self._update_profile_scroll)
+        ttk.Style(self.window).configure("Profile.Toolbutton", padding=(12, 5))
+        ttk.Label(
+            self.profile_section,
+            text="每个 Profile 独立保存宏和一键启动；切换时自动保存并应用。双击标签可重命名。",
+            foreground="#666666",
+        ).pack(anchor="w", padx=15, pady=(4, 2))
+
+    def _update_profile_scroll(self, _event: tk.Event | None = None) -> None:
+        self.profile_canvas.configure(scrollregion=self.profile_canvas.bbox("all"))
+        if self.profile_tabs.winfo_reqwidth() > self.profile_canvas.winfo_width():
+            self.profile_scroll.pack(fill="x")
+        else:
+            self.profile_scroll.pack_forget()
+            self.profile_canvas.xview_moveto(0)
+
+    def _render_profile_tabs(self) -> None:
+        for child in self.profile_tabs.winfo_children():
+            child.destroy()
+        self.profile_tab_var.set(self.active_profile_id)
+        active_tab = None
+        for profile in self.profiles:
+            tab = ttk.Radiobutton(
+                self.profile_tabs, text=profile.name, value=profile.id,
+                variable=self.profile_tab_var, style="Profile.Toolbutton",
+                command=lambda profile_id=profile.id: self.switch_profile(profile_id),
+            )
+            tab.pack(side="left", padx=(0, 4))
+            tab.bind("<Double-Button-1>", lambda _event, profile_id=profile.id: self.rename_profile(profile_id))
+            if profile.id == self.active_profile_id:
+                active_tab = tab
+        self.delete_profile_button.configure(state="normal" if len(self.profiles) > 1 else "disabled")
+        self.window.update_idletasks()
+        self._update_profile_scroll()
+        if active_tab is not None and self.profile_tabs.winfo_reqwidth() > self.profile_canvas.winfo_width():
+            self.profile_canvas.xview_moveto(active_tab.winfo_x() / self.profile_tabs.winfo_reqwidth())
+
+    def _update_content_scroll(self, _event: tk.Event | None = None) -> None:
+        self.content_canvas.itemconfigure(
+            self.content_window, width=max(self.main_content.winfo_reqwidth(), self.content_canvas.winfo_width()),
+        )
+        self.content_canvas.configure(scrollregion=self.content_canvas.bbox("all"))
+
+    def _scroll_content(self, event: tk.Event) -> None:
+        if event.delta and self.main_content.winfo_reqheight() > self.content_canvas.winfo_height():
+            self.content_canvas.yview_scroll(-int(event.delta / 120), "units")
+
+    def switch_profile(self, profile_id: str) -> None:
+        if profile_id == self.active_profile_id:
+            return
+        try:
+            config = select_config_profile(self._collect_config(), profile_id)
+            self._apply_config(config, "已切换 Profile，配置已自动保存并应用")
+        except Exception as exc:
+            self.profile_tab_var.set(self.active_profile_id)
+            messagebox.showerror(APP_NAME, str(exc), parent=self.window)
+
+    def add_profile(self) -> None:
+        index = 1
+        names = {profile.name for profile in self.profiles}
+        while f"配置 {index}" in names:
+            index += 1
+        try:
+            config = self._collect_config()
+            profile = ProfileConfig(make_stable_id("tab"), f"配置 {index}", [], [])
+            config.profiles.append(profile)
+            self._apply_config(select_config_profile(config, profile.id), "已新建 Profile，请添加宏和一键启动配置")
+        except Exception as exc:
+            messagebox.showerror(APP_NAME, str(exc), parent=self.window)
+
+    def rename_profile(self, profile_id: str | None = None) -> None:
+        profile_id = profile_id or self.active_profile_id
+        profile = next((profile for profile in self.profiles if profile.id == profile_id), None)
+        if profile is None:
+            return
+        name = simpledialog.askstring("重命名 Profile", "配置名称：", initialvalue=profile.name, parent=self.window)
+        if name is None:
+            return
+        try:
+            config = self._collect_config()
+            next(profile for profile in config.profiles if profile.id == profile_id).name = name.strip()
+            self._apply_config(config, "已重命名 Profile")
+        except Exception as exc:
+            messagebox.showerror(APP_NAME, str(exc), parent=self.window)
+
+    def remove_profile(self) -> None:
+        if len(self.profiles) <= 1:
+            return
+        profile = next(profile for profile in self.profiles if profile.id == self.active_profile_id)
+        if not messagebox.askyesno(APP_NAME, f"删除 Profile“{profile.name}”及其全部宏和一键启动配置？", parent=self.window):
+            return
+        try:
+            # The deleted Profile's draft does not need to pass validation.
+            config = self.engine.snapshot(include_profiles=True).config
+            index = next(index for index, profile in enumerate(config.profiles) if profile.id == self.active_profile_id)
+            del config.profiles[index]
+            config.macros = None
+            config.toggle_profiles = None
+            config.active_profile_id = config.profiles[min(index, len(config.profiles) - 1)].id
+            self._apply_config(config, "已删除 Profile 并切换到相邻配置")
+        except Exception as exc:
+            messagebox.showerror(APP_NAME, str(exc), parent=self.window)
 
     def _new_macro_vars(self, macro: MacroConfig) -> dict[str, object]:
         sequence = normalize_sequence(macro.sequence)
@@ -1764,13 +1925,41 @@ class ConfigWindow:
         self._fit_to_content()
         self.status_var.set("已删除宏")
 
-    def add_recorded_macro(self, events: list[dict[str, object]]) -> None:
+    def add_recorded_macro(self, events: list[dict[str, object]], profile_id: str = "") -> None:
         recording = normalize_recording(events)
         if not recording:
             self.status_var.set("录制结束，但没有捕获到有效动作")
             self._reveal_window()
             return
+        if profile_id and profile_id != self.active_profile_id:
+            config = self.engine.snapshot(include_profiles=True).config
+            profile = next((profile for profile in config.profiles if profile.id == profile_id), None)
+            if profile is None:
+                self.status_var.set("录制所属的 Profile 已删除，未添加录制宏")
+                return
+            names = {macro.name for macro in profile.macros}
+            index = 1
+            while f"录制宏 {index}" in names:
+                index += 1
+            used = {macro.trigger for macro in profile.macros}
+            used.update(toggle.trigger for toggle in profile.toggle_profiles)
+            used.add(config.recording_trigger)
+            profile.macros.append(MacroConfig(
+                enabled=False, name=f"录制宏 {index}",
+                trigger=next((key for key in COMMON_TRIGGER_KEYS if key not in used), "f12"),
+                action=ACTION_RECORDED, sequence=["none"] * 4,
+                id=make_stable_id("macro"), recording=recording,
+            ))
+            validate_config(config)
+            save_config(self.config_path, config)
+            self.engine.update_config(config)
+            self.profiles = config.profiles
+            self.status_var.set(f"已将录制宏保存到 Profile“{profile.name}”，请切换后启用")
+            return
         index = self._next_blank_macro_index()
+        names = {str(row["name"].get()).strip() for row in self.macro_vars}
+        while f"录制宏 {index}" in names:
+            index += 1
         macro = MacroConfig(
             enabled=False,
             name=f"录制宏 {index}",
@@ -1810,11 +1999,12 @@ class ConfigWindow:
         macro_ids = [str(vars_for_row["id"]) for vars_for_row in self.macro_vars]
         for profile_vars in self.toggle_profile_vars:
             previous_vars = profile_vars.get("selected_vars", {})
-            previous_selected = {
-                macro_id for macro_id, selected_var in previous_vars.items()
-                if selected_var.get()
-            }
-            previous_selected.update(profile_vars.get("selected_macro_ids", set()))
+            previous_selected = set(profile_vars.get("selected_macro_ids", set()))
+            for macro_id, selected_var in previous_vars.items():
+                if selected_var.get():
+                    previous_selected.add(macro_id)
+                else:
+                    previous_selected.discard(macro_id)
             selected_vars: dict[str, tk.BooleanVar] = {}
             for macro_id in macro_ids:
                 selected_vars[macro_id] = tk.BooleanVar(value=macro_id in previous_selected)
@@ -2046,11 +2236,15 @@ class ConfigWindow:
         webbrowser.open(self.latest_release_url)
 
     def load_from_engine(self) -> None:
-        config = self.engine.snapshot().config
+        config = self.engine.snapshot(include_profiles=True).config
+        self.profiles = config.profiles or []
+        self.active_profile_id = config.active_profile_id
+        self.record_target_var = None
+        self._render_profile_tabs()
         self.title_var.set(config.window_title_contains)
         self.process_var.set(config.process_name)
+        self.toggle_profile_vars = [self._new_toggle_profile_vars(profile) for profile in config.toggle_profiles or []]
         self.set_macro_rows(normalize_macros(config.macros))
-        self.set_toggle_profile_rows(normalize_toggle_profiles(config.toggle_profiles, normalize_macros(config.macros)))
         self.overlay_enabled_var.set(config.overlay_enabled)
         self.overlay_opacity_var.set(config.overlay_opacity)
         self.overlay_avoid_mouse_var.set(config.overlay_avoid_mouse)
@@ -2175,65 +2369,77 @@ class ConfigWindow:
             parent=self.advanced_window if self.advanced_window and self.advanced_window.winfo_exists() else self.window,
         )
 
+    def _collect_config(self) -> Config:
+        macros: list[MacroConfig] = []
+        for vars_for_row in self.macro_vars:
+            macro_name = str(vars_for_row["name"].get()).strip() or "未命名宏"
+            trigger_text = str(vars_for_row["trigger"].get()).strip()
+            if not is_valid_key_text(trigger_text, TRIGGER_KEYS) or trigger_label_to_id(trigger_text) == "left":
+                raise ValueError(f"{macro_name} 的开关键无效：{trigger_text}")
+            for slot_name in ["slot1", "slot2", "slot3", "slot4"]:
+                slot_text = str(vars_for_row[slot_name].get()).strip()
+                if not is_valid_key_text(slot_text, PRESS_KEYS):
+                    raise ValueError(f"{macro_name} 的{slot_name.replace('slot', '槽位')}无效：{slot_text}")
+            macros.append(MacroConfig(
+                enabled=bool(vars_for_row["enabled"].get()),
+                name=macro_name,
+                trigger=trigger_label_to_id(trigger_text),
+                action=action_label_to_id(str(vars_for_row["action"].get())),
+                sequence=[press_key_label_to_id(str(vars_for_row[name].get())) for name in ["slot1", "slot2", "slot3", "slot4"]],
+                interval_ms=parse_interval_ms(vars_for_row["interval"].get(), macro_name),
+                id=str(vars_for_row["id"]),
+                playback_mode=playback_mode_label_to_id(str(vars_for_row["playback_mode"].get())),
+                recording=normalize_recording(vars_for_row.get("recording")),
+            ))
+        toggle_profiles: list[ToggleProfile] = []
+        for profile_vars in self.toggle_profile_vars:
+            selected_vars = profile_vars["selected_vars"]
+            toggle_profiles.append(ToggleProfile(
+                enabled=bool(profile_vars["enabled"].get()),
+                trigger=optional_trigger_label_to_id(str(profile_vars["trigger"].get()).strip()),
+                macro_ids=[macro_id for macro_id, selected_var in selected_vars.items() if selected_var.get()],
+                id=str(profile_vars["id"]),
+            ))
+        return normalize_config(Config(
+            window_title_contains=self.title_var.get().strip(),
+            process_name=self.process_var.get().strip(),
+            macros=macros,
+            toggle_profiles=toggle_profiles,
+            poll_interval_ms=DEFAULT_POLL_INTERVAL_MS,
+            overlay_enabled=bool(self.overlay_enabled_var.get()),
+            overlay_opacity=float(self.overlay_opacity_var.get()),
+            overlay_avoid_mouse=bool(self.overlay_avoid_mouse_var.get()),
+            overlay_avoid_distance=int(self.overlay_avoid_distance_var.get()),
+            recording_trigger=optional_trigger_label_to_id(str(self.recording_trigger_var.get()).strip()),
+            recording_countdown_sec=int(self.recording_countdown_var.get()),
+            recording_max_seconds=int(self.recording_max_seconds_var.get()),
+            profiles=self.profiles,
+            active_profile_id=self.active_profile_id,
+        ))
+
+    def _apply_config(self, config: Config, status: str) -> None:
+        config = normalize_config(config)
+        validate_config(config)
+        save_config(self.config_path, config)
+        self.engine.update_config(config)
+        self.load_from_engine()
+        self.content_canvas.yview_moveto(0)
+        self.status_var.set(status)
+
     def save(self) -> None:
         try:
-            macros: list[MacroConfig] = []
-            for vars_for_row in self.macro_vars:
-                macro_name = str(vars_for_row["name"].get()).strip() or "未命名宏"
-                trigger_text = str(vars_for_row["trigger"].get()).strip()
-                if not is_valid_key_text(trigger_text, TRIGGER_KEYS) or trigger_label_to_id(trigger_text) == "left":
-                    raise ValueError(f"{macro_name} 的开关键无效：{trigger_text}")
-                for slot_name in ["slot1", "slot2", "slot3", "slot4"]:
-                    slot_text = str(vars_for_row[slot_name].get()).strip()
-                    if not is_valid_key_text(slot_text, PRESS_KEYS):
-                        raise ValueError(f"{macro_name} 的{slot_name.replace('slot', '槽位')}无效：{slot_text}")
-                macros.append(MacroConfig(
-                    enabled=bool(vars_for_row["enabled"].get()),
-                    name=macro_name,
-                    trigger=trigger_label_to_id(trigger_text),
-                    action=action_label_to_id(str(vars_for_row["action"].get())),
-                    sequence=[press_key_label_to_id(str(vars_for_row[name].get())) for name in ["slot1", "slot2", "slot3", "slot4"]],
-                    interval_ms=parse_interval_ms(vars_for_row["interval"].get(), macro_name),
-                    id=str(vars_for_row["id"]),
-                    playback_mode=playback_mode_label_to_id(str(vars_for_row["playback_mode"].get())),
-                    recording=normalize_recording(vars_for_row.get("recording")),
-                ))
-            toggle_profiles: list[ToggleProfile] = []
-            for profile_vars in self.toggle_profile_vars:
-                selected_vars = profile_vars["selected_vars"]
-                toggle_profiles.append(ToggleProfile(
-                    enabled=bool(profile_vars["enabled"].get()),
-                    trigger=optional_trigger_label_to_id(str(profile_vars["trigger"].get()).strip()),
-                    macro_ids=[macro_id for macro_id, selected_var in selected_vars.items() if selected_var.get()],
-                    id=str(profile_vars["id"]),
-                ))
-            config = Config(
-                window_title_contains=self.title_var.get().strip(),
-                process_name=self.process_var.get().strip(),
-                macros=macros,
-                toggle_profiles=toggle_profiles,
-                poll_interval_ms=DEFAULT_POLL_INTERVAL_MS,
-                overlay_enabled=bool(self.overlay_enabled_var.get()),
-                overlay_opacity=float(self.overlay_opacity_var.get()),
-                overlay_avoid_mouse=bool(self.overlay_avoid_mouse_var.get()),
-                overlay_avoid_distance=int(self.overlay_avoid_distance_var.get()),
-                recording_trigger=optional_trigger_label_to_id(str(self.recording_trigger_var.get()).strip()),
-                recording_countdown_sec=int(self.recording_countdown_var.get()),
-                recording_max_seconds=int(self.recording_max_seconds_var.get()),
-            )
-            validate_config(config)
-            save_config(self.config_path, config)
-            self.engine.update_config(config)
-            self.status_var.set("已保存并应用")
+            self._apply_config(self._collect_config(), "已保存并应用")
         except Exception as exc:
             messagebox.showerror(APP_NAME, str(exc), parent=self.window)
 
     def defaults(self) -> None:
-        config = Config(macros=default_macros())
-        self.engine.update_config(config)
-        save_config(self.config_path, config)
-        self.load_from_engine()
-        self.status_var.set("已恢复默认")
+        try:
+            config = self.engine.snapshot(include_profiles=True).config
+            config.macros = default_macros()
+            config.toggle_profiles = default_toggle_profiles(config.macros)
+            self._apply_config(config, "已恢复当前 Profile 默认宏")
+        except Exception as exc:
+            messagebox.showerror(APP_NAME, str(exc), parent=self.window)
 
     def detect_foreground(self) -> None:
         hwnd = user32.GetForegroundWindow()
@@ -2625,18 +2831,46 @@ def normalize_toggle_profiles(profiles: list[ToggleProfile] | None, macros: list
     return normalized
 
 
-def normalize_config(config: Config) -> Config:
+def normalize_config(config: Config, include_profiles: bool = True) -> Config:
     window_title_contains = str(config.window_title_contains).strip()
     process_name = str(config.process_name).strip()
     if not window_title_contains and not process_name:
         window_title_contains = DEFAULT_WINDOW_TITLE_CONTAINS
         process_name = DEFAULT_PROCESS_NAME
-    macros = normalize_macros(config.macros)
+    profiles: list[ProfileConfig] | None = None
+    active_profile_id = config.active_profile_id
+    macros_source = config.macros
+    toggles_source = config.toggle_profiles
+    if include_profiles:
+        profiles = []
+        for profile in config.profiles or []:
+            profile_macros = normalize_macros(profile.macros)
+            profiles.append(ProfileConfig(
+                id=str(profile.id).strip() or make_stable_id("tab"),
+                name=str(profile.name).strip(),
+                macros=profile_macros,
+                toggle_profiles=normalize_toggle_profiles(profile.toggle_profiles, profile_macros),
+            ))
+        if not profiles:
+            profile_macros = normalize_macros(macros_source)
+            profiles.append(ProfileConfig(
+                id=active_profile_id or "tab_default",
+                name="默认配置",
+                macros=profile_macros,
+                toggle_profiles=normalize_toggle_profiles(toggles_source, profile_macros),
+            ))
+        active = next((profile for profile in profiles if profile.id == active_profile_id), profiles[0])
+        active_profile_id = active.id
+        if macros_source is not None:
+            active.macros = normalize_macros(macros_source)
+            active.toggle_profiles = normalize_toggle_profiles(toggles_source, active.macros)
+        macros_source, toggles_source = active.macros, active.toggle_profiles
+    macros = normalize_macros(macros_source)
     return Config(
         window_title_contains=window_title_contains,
         process_name=process_name,
         macros=macros,
-        toggle_profiles=normalize_toggle_profiles(config.toggle_profiles, macros),
+        toggle_profiles=normalize_toggle_profiles(toggles_source, macros),
         poll_interval_ms=DEFAULT_POLL_INTERVAL_MS,
         overlay_enabled=bool(config.overlay_enabled),
         overlay_opacity=float(config.overlay_opacity),
@@ -2645,31 +2879,25 @@ def normalize_config(config: Config) -> Config:
         recording_trigger=optional_trigger_label_to_id(str(config.recording_trigger)),
         recording_countdown_sec=max(int(config.recording_countdown_sec), 0),
         recording_max_seconds=max(int(config.recording_max_seconds), 1),
+        profiles=profiles,
+        active_profile_id=active_profile_id,
     )
 
 
-def clone_config(config: Config) -> Config:
-    normalized = normalize_config(config)
-    return Config(
-        window_title_contains=normalized.window_title_contains,
-        process_name=normalized.process_name,
-        macros=[
-            MacroConfig(m.enabled, m.name, m.trigger, m.action, list(m.sequence), m.interval_ms, m.id, m.playback_mode, normalize_recording(m.recording))
-            for m in (normalized.macros or [])
-        ],
-        toggle_profiles=[
-            ToggleProfile(profile.enabled, profile.trigger, list(profile.macro_ids), profile.id)
-            for profile in (normalized.toggle_profiles or [])
-        ],
-        poll_interval_ms=normalized.poll_interval_ms,
-        overlay_enabled=normalized.overlay_enabled,
-        overlay_opacity=normalized.overlay_opacity,
-        overlay_avoid_mouse=normalized.overlay_avoid_mouse,
-        overlay_avoid_distance=normalized.overlay_avoid_distance,
-        recording_trigger=normalized.recording_trigger,
-        recording_countdown_sec=normalized.recording_countdown_sec,
-        recording_max_seconds=normalized.recording_max_seconds,
-    )
+def clone_config(config: Config, include_profiles: bool = True) -> Config:
+    # Normalization creates independent macro, recording and one-key launch lists.
+    return normalize_config(config, include_profiles=include_profiles)
+
+
+def select_config_profile(config: Config, profile_id: str) -> Config:
+    config = normalize_config(config)
+    profile = next((profile for profile in config.profiles or [] if profile.id == profile_id), None)
+    if profile is None:
+        raise ValueError("找不到这个 Profile。")
+    config.active_profile_id = profile.id
+    config.macros = profile.macros
+    config.toggle_profiles = profile.toggle_profiles
+    return normalize_config(config)
 
 
 def press_sequence_item(item: str) -> None:
@@ -2861,13 +3089,25 @@ def detect_foreground() -> None:
 
 def load_config(path: Path) -> Config:
     if not path.exists():
-        config = Config(macros=default_macros())
+        config = normalize_config(Config(macros=default_macros()))
         save_config(path, config)
         return config
 
     raw = json.loads(path.read_text(encoding="utf-8"))
-    macros = parse_macros(raw)
-    toggle_profiles = parse_toggle_profiles(raw, macros)
+    profiles: list[ProfileConfig] = []
+    if isinstance(raw.get("profiles"), list):
+        for item in raw["profiles"]:
+            if not isinstance(item, dict):
+                continue
+            profile_macros = parse_macros(item)
+            profiles.append(ProfileConfig(
+                id=str(item.get("id", "")).strip(),
+                name=str(item.get("name", "")).strip(),
+                macros=profile_macros,
+                toggle_profiles=parse_toggle_profiles(item, profile_macros),
+            ))
+    macros = None if profiles else parse_macros(raw)
+    toggle_profiles = None if profiles else parse_toggle_profiles(raw, macros)
     config = Config(
         window_title_contains=str(raw.get("window_title_contains", "")).strip(),
         process_name=str(raw.get("process_name", "")).strip(),
@@ -2881,19 +3121,56 @@ def load_config(path: Path) -> Config:
         recording_trigger=str(raw.get("recording_trigger", DEFAULT_RECORD_TRIGGER)).strip(),
         recording_countdown_sec=int(raw.get("recording_countdown_sec", DEFAULT_RECORD_COUNTDOWN_SEC)),
         recording_max_seconds=int(raw.get("recording_max_seconds", DEFAULT_RECORD_MAX_SECONDS)),
+        profiles=profiles,
+        active_profile_id=str(raw.get("active_profile_id", "")).strip(),
     )
 
+    config = normalize_config(config)
     validate_config(config)
     save_config(path, config)
     return config
 
 
 def save_config(path: Path, config: Config) -> None:
-    path.write_text(json.dumps(asdict(normalize_config(config)), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    data = asdict(normalize_config(config))
+    # The top-level lists are only the engine's view of the selected Profile.
+    del data["macros"], data["toggle_profiles"]
+    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def validate_config(config: Config) -> None:
     config = normalize_config(config)
+    profile_ids: set[str] = set()
+    profile_names: set[str] = set()
+    for profile in config.profiles or []:
+        if profile.id in profile_ids:
+            raise ValueError("Profile 标识重复。")
+        profile_ids.add(profile.id)
+        if not profile.name:
+            raise ValueError("Profile 名称不能为空。")
+        if profile.name in profile_names:
+            raise ValueError(f"Profile 名称重复：{profile.name}")
+        profile_names.add(profile.name)
+        try:
+            validate_profile_macros(profile, config.recording_trigger)
+        except ValueError as exc:
+            raise ValueError(f"{profile.name}：{exc}") from exc
+    if not MIN_OVERLAY_AVOID_DISTANCE <= config.overlay_avoid_distance <= MAX_OVERLAY_AVOID_DISTANCE:
+        raise ValueError(f"浮层躲避距离必须在 {MIN_OVERLAY_AVOID_DISTANCE} 到 {MAX_OVERLAY_AVOID_DISTANCE} 像素之间。")
+    if config.poll_interval_ms < 50:
+        raise ValueError("轮询间隔不能小于 50ms。")
+    if config.recording_countdown_sec < 0:
+        raise ValueError("录制倒计时不能小于 0 秒。")
+    if config.recording_max_seconds < 1:
+        raise ValueError("最长录制时长不能小于 1 秒。")
+
+
+def validate_profile_macros(config: ProfileConfig, recording_trigger: str) -> None:
     active_triggers = []
     names = set()
     for macro in config.macros or []:
@@ -2929,18 +3206,10 @@ def validate_config(config: Config) -> None:
         if profile.trigger in seen:
             raise ValueError(f"一键启动配置 {index + 1} 不能和 {seen[profile.trigger]} 使用同一个按键：{trigger_id_to_label(profile.trigger)}。")
         seen[profile.trigger] = f"一键启动配置 {index + 1}"
-    if config.recording_trigger not in OPTIONAL_TRIGGER_KEYS:
+    if recording_trigger not in OPTIONAL_TRIGGER_KEYS:
         raise ValueError("录制快捷键无效。")
-    if config.recording_trigger != "none" and config.recording_trigger in seen:
-        raise ValueError(f"宏录制不能和 {seen[config.recording_trigger]} 使用同一个按键：{trigger_id_to_label(config.recording_trigger)}。")
-    if not MIN_OVERLAY_AVOID_DISTANCE <= config.overlay_avoid_distance <= MAX_OVERLAY_AVOID_DISTANCE:
-        raise ValueError(f"浮层躲避距离必须在 {MIN_OVERLAY_AVOID_DISTANCE} 到 {MAX_OVERLAY_AVOID_DISTANCE} 像素之间。")
-    if config.poll_interval_ms < 50:
-        raise ValueError("轮询间隔不能小于 50ms。")
-    if config.recording_countdown_sec < 0:
-        raise ValueError("录制倒计时不能小于 0 秒。")
-    if config.recording_max_seconds < 1:
-        raise ValueError("最长录制时长不能小于 1 秒。")
+    if recording_trigger != "none" and recording_trigger in seen:
+        raise ValueError(f"宏录制不能和 {seen[recording_trigger]} 使用同一个按键：{trigger_id_to_label(recording_trigger)}。")
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -3112,9 +3381,9 @@ def run_gui(config: Config, config_path: Path) -> int:
         root.destroy()
 
     def tick() -> None:
-        def handle_recording_done(events: list[dict[str, object]]) -> None:
+        def handle_recording_done(events: list[dict[str, object]], profile_id: str) -> None:
             try:
-                app.add_recorded_macro(events)
+                app.add_recorded_macro(events, profile_id)
             except Exception as exc:
                 app.status_var.set(f"添加录制宏失败：{exc}")
                 app._reveal_window()
@@ -3123,7 +3392,7 @@ def run_gui(config: Config, config_path: Path) -> int:
             while True:
                 command = command_queue.get_nowait()
                 if isinstance(command, dict) and command.get("type") == "recording_done":
-                    root.after(0, lambda events=normalize_recording(command.get("events")): handle_recording_done(events))
+                    root.after(0, lambda events=normalize_recording(command.get("events")), profile_id=str(command.get("profile_id", "")): handle_recording_done(events, profile_id))
                 elif isinstance(command, dict) and command.get("type") == "engine_error":
                     if command.get("released", False):
                         app.status_var.set(f"宏引擎已停止，输入已释放：{command.get('message', '未知错误')}")
