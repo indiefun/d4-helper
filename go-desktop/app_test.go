@@ -43,7 +43,7 @@ func TestTimelineSaveReloadAndRuntime(t *testing.T) {
 		t.Fatal("saving did not rearm macro shortcuts", err)
 	}
 	_, cfg, err := timeline.Normalize(w.Content)
-	if err != nil || cfg.Version != 3 || len(cfg.Macros[0].Tracks) != 3 {
+	if err != nil || cfg.Version != 3 || len(cfg.Macros[0].Tracks) != 1 {
 		t.Fatal("timeline save lost tracks", err)
 	}
 	p, err := a.PreviewMacro(raw, cfg.Macros[0].ID)

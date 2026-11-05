@@ -1,9 +1,11 @@
 package timeline
 
 import (
-	"github.com/indiefun/d4-helper/go-desktop/internal/sequence"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/indiefun/d4-helper/go-desktop/internal/sequence"
 )
 
 func one(tracks ...Track) Definition {
@@ -31,21 +33,48 @@ func TestOverlappingKeyHoldsHaveIndependentOwners(t *testing.T) {
 	if len(p.Events) != 2 || p.Events[1].Offset != 900*time.Millisecond {
 		t.Fatal("early release of overlapping hold")
 	}
-}
-func TestExplicitDownAndUpCanLiveOnDifferentTracks(t *testing.T) {
-	m := one(Track{ID: "a", Blocks: []Block{{ID: "down", Type: "down", Key: "f", AtMS: 100}}}, Track{ID: "b", Blocks: []Block{{ID: "up", Type: "up", Key: "f", AtMS: 900}}})
-	p, err := Compile(m)
-	if err != nil || len(p.Events) != 2 {
-		t.Fatal(err)
-	}
 	m.Tracks[1].Muted = true
-	if _, err := Compile(m); err == nil {
-		t.Fatal("unmatched down after mute accepted")
+	p, err = Compile(m)
+	if err != nil || len(p.Events) != 2 || p.Events[1].Offset != 500*time.Millisecond {
+		t.Fatal("muting a hold changed another block's release", err)
 	}
 }
-func TestRepeatedClicksAndMovementExpansion(t *testing.T) {
+func TestRemovedKeyActionsAreRejected(t *testing.T) {
+	for _, kind := range []string{"down", "up"} {
+		t.Run(kind, func(t *testing.T) {
+			for _, muted := range []bool{false, true} {
+				m := one(Track{ID: "track", Muted: muted, Blocks: []Block{{ID: "block", Type: kind, Key: "f", AtMS: 100}}})
+				if _, err := Compile(m); err == nil || !strings.Contains(err.Error(), "未知动作") {
+					t.Fatalf("removed action %q accepted (muted=%t): %v", kind, muted, err)
+				}
+			}
+		})
+	}
+}
+func TestAdjacentKeyBlocksKeepReleaseAndPressAtBoundary(t *testing.T) {
+	m := one(Track{ID: "track", Blocks: []Block{{ID: "hold", Type: "hold", Key: "f", DurationMS: 500}, {ID: "tap", Type: "tap", Key: "f", AtMS: 500, DurationMS: 60}}})
+	p, err := Compile(m)
+	if err != nil || len(p.Events) != 4 {
+		t.Fatalf("adjacent blocks merged: %+v, %v", p, err)
+	}
+	for i, offset := range []time.Duration{0, 500 * time.Millisecond, 500 * time.Millisecond, 560 * time.Millisecond} {
+		if p.Events[i].Offset != offset || p.Events[i].Down != (i%2 == 0) {
+			t.Fatalf("wrong key transition at boundary: %+v", p.Events)
+		}
+	}
+}
+func TestArrowKeysRemainSupportedByPairedBlocks(t *testing.T) {
+	for _, key := range []string{"down", "up"} {
+		m := one(Track{ID: "track", Blocks: []Block{{ID: "block", Type: "tap", Key: key, DurationMS: 60}}})
+		p, err := Compile(m)
+		if err != nil || len(p.Events) != 2 || p.Events[0].Key != key || !p.Events[0].Down || p.Events[1].Down {
+			t.Fatalf("arrow key %q lost paired input: %+v, %v", key, p, err)
+		}
+	}
+}
+func TestEachClickCompilesOnceAndMovementExpands(t *testing.T) {
 	x, y, fx, fy := 100, 200, 0, 0
-	m := one(Track{ID: "a", Blocks: []Block{{ID: "tap", Type: "tap", Key: "f", AtMS: 0, DurationMS: 20, RepeatMS: 100}}}, Track{ID: "b", Blocks: []Block{{ID: "move", Type: "move", AtMS: 300, DurationMS: 80, X: &x, Y: &y, FromX: &fx, FromY: &fy}}})
+	m := one(Track{ID: "a", Blocks: []Block{{ID: "tap", Type: "tap", Key: "f", AtMS: 0, DurationMS: 20}}}, Track{ID: "b", Blocks: []Block{{ID: "move", Type: "move", AtMS: 300, DurationMS: 80, X: &x, Y: &y, FromX: &fx, FromY: &fy}}})
 	p, err := Compile(m)
 	if err != nil {
 		t.Fatal(err)
@@ -58,8 +87,22 @@ func TestRepeatedClicksAndMovementExpansion(t *testing.T) {
 			moves++
 		}
 	}
-	if keyCount != 40 || moves != 11 {
+	if keyCount != 2 || moves != 11 {
 		t.Fatalf("bad expansion: %d %d", keyCount, moves)
+	}
+}
+func TestLegacyRepeatMetadataDoesNotGenerateExtraClicks(t *testing.T) {
+	raw := `{"schema_version":3,"macros":[{"id":"m","name":"test","enabled":true,"trigger":"none","duration_ms":1000,"loop":true,"tracks":[{"id":"track","blocks":[{"id":"tap","type":"tap","key":"f","at_ms":0,"duration_ms":20,"repeat_ms":100}]}]}]}`
+	normalized, cfg, err := Normalize(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(normalized, "repeat_ms") {
+		t.Fatal("obsolete repeat setting remained in saved workspace")
+	}
+	p, err := Compile(cfg.Macros[0])
+	if err != nil || len(p.Events) != 2 || !p.Loop {
+		t.Fatalf("obsolete metadata changed the click count or macro loop: %+v, %v", p, err)
 	}
 }
 func TestConflictingMovementAndOutOfBoundsRejected(t *testing.T) {

@@ -27,7 +27,6 @@ type Block struct {
 	FromX      *int       `json:"from_x,omitempty"`
 	FromY      *int       `json:"from_y,omitempty"`
 	Delta      int        `json:"delta,omitempty"`
-	RepeatMS   int64      `json:"repeat_ms,omitempty"`
 	Path       []Waypoint `json:"path,omitempty"`
 }
 type Waypoint struct {
@@ -75,9 +74,11 @@ func NewID(prefix string) string {
 func Default() Config {
 	return Config{Version: 3, WindowTitle: "暗黑破坏神IV", Process: "Diablo IV.exe", Overlay: true, Opacity: .6, AvoidMouse: true, AvoidDistance: 72, RecordingTrigger: "f12", Countdown: 3, MaxSeconds: 60, EmergencyTrigger: "pause", Macros: []Definition{
 		{ID: "starter", Name: "我的第一个宏", Enabled: true, Trigger: "f1", DurationMS: 2000, Tracks: []Track{
-			{ID: "track_keys", Name: "键盘", Blocks: []Block{{ID: "sample_click", Type: "tap", Key: "2", AtMS: 200, DurationMS: 60}, {ID: "sample_click2", Type: "tap", Key: "1", AtMS: 800, DurationMS: 60}}},
-			{ID: "track_mouse", Name: "鼠标", Blocks: []Block{{ID: "sample_hold", Type: "hold", Key: "right", AtMS: 200, DurationMS: 1200}}},
-			{ID: "track_extra", Name: "更多动作", Blocks: []Block{}},
+			{ID: "track_main", Name: "轨道 1", Blocks: []Block{
+				{ID: "sample_click", Type: "tap", Key: "2", AtMS: 200, DurationMS: 60},
+				{ID: "sample_click2", Type: "tap", Key: "1", AtMS: 800, DurationMS: 60},
+				{ID: "sample_hold", Type: "hold", Key: "right", AtMS: 200, DurationMS: 1200},
+			}},
 		}},
 	}}
 }
