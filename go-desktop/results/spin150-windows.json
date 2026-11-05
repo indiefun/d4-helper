@@ -1,0 +1,60 @@
+{
+  "measured_at": "2026-11-05T02:35:39Z",
+  "platform": "windows/amd64",
+  "runtime": "go1.27.3",
+  "notes": "No SendInput calls. Native timestamps are captured at a stubbed SendInput; Go timestamps at a scheduler callback. This isolates scheduler timing, not game delivery. CPU percentage is relative to one logical core. Sequential, short samples are exploratory, not real-time guarantees.",
+  "reports": [
+    {
+      "engine": "go-waitable-timer",
+      "interval_ms": 1,
+      "samples": 2893,
+      "mean_ms": 1.0375347164591988,
+      "p50_ms": 1.0228,
+      "p95_ms": 1.5021,
+      "p99_ms": 1.8175,
+      "max_ms": 2.3514,
+      "cpu_percent_one_core": 31.765005513655094,
+      "elapsed_seconds": 3.0005504,
+      "spin_us": 150
+    },
+    {
+      "engine": "go-waitable-timer",
+      "interval_ms": 2,
+      "samples": 1501,
+      "mean_ms": 2.0002147999999975,
+      "p50_ms": 2.0494,
+      "p95_ms": 2.5326,
+      "p99_ms": 3.0204,
+      "max_ms": 3.3666,
+      "cpu_percent_one_core": 12.498657644169016,
+      "elapsed_seconds": 3.0003222,
+      "spin_us": 150
+    },
+    {
+      "engine": "go-waitable-timer",
+      "interval_ms": 5,
+      "samples": 601,
+      "mean_ms": 5.000068833333334,
+      "p50_ms": 5.0781,
+      "p95_ms": 5.2825,
+      "p99_ms": 5.5088,
+      "max_ms": 5.7289,
+      "cpu_percent_one_core": 4.166609306345216,
+      "elapsed_seconds": 3.0000413,
+      "spin_us": 150
+    },
+    {
+      "engine": "go-waitable-timer",
+      "interval_ms": 10,
+      "samples": 301,
+      "mean_ms": 10.001021333333336,
+      "p50_ms": 10.0101,
+      "p95_ms": 10.3673,
+      "p99_ms": 10.51,
+      "max_ms": 10.7399,
+      "cpu_percent_one_core": 1.56234043296378,
+      "elapsed_seconds": 3.0003064,
+      "spin_us": 150
+    }
+  ]
+}

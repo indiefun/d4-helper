@@ -1,0 +1,21 @@
+{
+  "measured_at": "2026-11-05T02:38:20Z",
+  "platform": "windows/amd64",
+  "runtime": "go1.27.3",
+  "notes": "No SendInput calls. Native timestamps are captured at a stubbed SendInput; Go timestamps at a scheduler callback. This isolates scheduler timing, not game delivery. CPU percentage is relative to one logical core. Sequential, short samples are exploratory, not real-time guarantees.",
+  "reports": [
+    {
+      "engine": "go-waitable-timer",
+      "interval_ms": 1,
+      "samples": 4815,
+      "mean_ms": 1.038570419609472,
+      "p50_ms": 1.0002,
+      "p95_ms": 1.5049,
+      "p99_ms": 1.5155,
+      "max_ms": 2.2362,
+      "cpu_percent_one_core": 99.99600215983365,
+      "elapsed_seconds": 5.0001999,
+      "spin_us": 1000
+    }
+  ]
+}

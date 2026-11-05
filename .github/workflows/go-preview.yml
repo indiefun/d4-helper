@@ -1,0 +1,54 @@
+name: Go refactor validation
+
+on:
+  pull_request:
+    paths: ['go-desktop/**', 'native/fast_input_kernel.cpp', 'config.json', '.github/workflows/go-preview.yml']
+  push:
+    branches: ['refactor/go-desktop']
+    paths: ['go-desktop/**', 'native/fast_input_kernel.cpp', 'config.json', '.github/workflows/go-preview.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: go-desktop
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: go-desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: go-desktop/package-lock.json
+      - name: Go tests and checks
+        run: |
+          go test ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Go tests failed' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Go vet failed' }
+      - name: Editor logic tests
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Editor tests failed' }
+      - name: Build Go desktop
+        run: |
+          ./build.ps1
+      - name: WebView renderer and Go bridge smoke test
+        run: ./tools/smoke.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: D4Helper-Go-Development
+          path: |
+            go-desktop/build/D4Helper.exe
+            go-desktop/build/timingbench.exe

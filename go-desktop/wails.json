@@ -1,0 +1,7 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "D4Helper Studio",
+  "outputfilename": "D4Helper",
+  "frontend:dir": "frontend",
+  "author": { "name": "D4Helper contributors" }
+}

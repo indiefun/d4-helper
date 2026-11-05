@@ -1,0 +1,8 @@
+/build/
+/config.go-preview.json
+/config.go.json
+/workspace.timeline.json
+/results/*.local.json
+/results/*-local.json
+/node_modules/
+/*.syso

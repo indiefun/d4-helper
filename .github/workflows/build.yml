@@ -21,20 +21,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          python-version: "3.14"
-          cache: pip
+          go-version: '1.27.x'
+          cache-dependency-path: go-desktop/go.sum
 
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: go-desktop/package-lock.json
 
-      - name: Syntax check
-        run: python -m py_compile right_hold_toggle.py
-
-      - name: Input safety tests
-        run: python -m unittest discover -s tests -v
+      - name: Go input safety, configuration and native service tests
+        working-directory: go-desktop
+        shell: pwsh
+        run: |
+          go test ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Go tests failed' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Go vet failed' }
+      - name: Editor tests
+        working-directory: go-desktop
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Editor tests failed' }
 
       - name: Read version
         id: version
@@ -50,12 +64,16 @@ jobs:
         shell: pwsh
         run: ./build.ps1
 
+      - name: Desktop renderer and bridge smoke test
+        shell: pwsh
+        run: ./go-desktop/tools/smoke.ps1
+
       - name: Prepare portable release assets
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $versionedArchive = ".\dist\D4Helper-portable-v$env:VERSION.zip"
+          $versionedArchive = ".\dist\D4Helper-Studio-v$env:VERSION.zip"
           if (-not (Test-Path -LiteralPath $versionedArchive)) {
             throw "Portable archive was not created: $versionedArchive"
           }
@@ -66,10 +84,10 @@ jobs:
         with:
           name: D4Helper-windows-latest
           path: |
-            dist/D4Helper.exe
-            dist/config.json
-            dist/VERSION
-            dist/D4Helper-portable-v*.zip
+            dist/studio/D4Helper.exe
+            dist/studio/workspace.timeline.json
+            dist/studio/VERSION
+            dist/D4Helper-Studio-v*.zip
             dist/D4Helper-windows-latest.zip
 
       - name: Create GitHub release
@@ -78,5 +96,6 @@ jobs:
         with:
           name: D4Helper ${{ github.ref_name }}
           generate_release_notes: true
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           files: |
             dist/D4Helper-windows-latest.zip

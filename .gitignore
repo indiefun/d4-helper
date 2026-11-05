@@ -23,3 +23,5 @@ native/*.obj
 .idea/
 .DS_Store
 Thumbs.db
+/config.go.json
+/workspace.timeline.json
