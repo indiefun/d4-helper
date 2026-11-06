@@ -7,6 +7,13 @@ try {
     $version = (Get-Content -LiteralPath '.\VERSION' -Raw).Trim()
     $destination = Join-Path $repositoryRoot 'dist\go'
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
+    $releaseBinary = [IO.Path]::GetFullPath((Join-Path $destination 'D4Helper.exe'))
+    $runningReleases = @(Get-Process -Name D4Helper -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $releaseBinary })
+    foreach ($runningRelease in $runningReleases) {
+        Write-Host "Closing running Go release before replacement: $releaseBinary (PID $($runningRelease.Id))"
+        Stop-Process -Id $runningRelease.Id -Force -ErrorAction Stop
+        if (-not $runningRelease.WaitForExit(5000)) { throw "Could not close running Go release: $releaseBinary" }
+    }
     Copy-Item -LiteralPath '.\go-desktop\build\D4Helper.exe' -Destination $destination -Force
     $configPath = Join-Path $destination 'workspace.timeline.json'
     if (-not (Test-Path -LiteralPath $configPath)) { Copy-Item -LiteralPath '.\go-desktop\build\default-workspace.timeline.json' -Destination $configPath }

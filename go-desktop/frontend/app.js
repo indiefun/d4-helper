@@ -10,11 +10,11 @@ let doc=M.demo(),selectedMacro=doc.macros[0].id,selectedBlock='',selectedTrack=d
 const rail=148,current=()=>doc.macros.find(m=>m.id===selectedMacro),grid=()=>$('snap').checked?10:1;
 function tell(text,error=false){$('notice').textContent=text;$('notice').hidden=!text;$('notice').classList.toggle('error',error);}
 function mark(){if(!dirty&&api()?.StopAll)api().StopAll().catch(e=>tell(String(e),true));dirty=true;$('save-state').textContent='未保存';stopPreview();}
-function edit(fn){const before=JSON.stringify(doc);try{fn();}catch(e){doc=JSON.parse(before);render();tell(String(e.message||e),true);return false;}if(JSON.stringify(doc)===before){render();return false;}history.push(before);if(history.length>60)history.shift();future=[];mark();render();return true;}
+function edit(fn){const before=JSON.stringify(doc);try{fn();doc.macros.forEach(M.syncTiming);}catch(e){doc=JSON.parse(before);render();tell(String(e.message||e),true);return false;}if(JSON.stringify(doc)===before){render();return false;}history.push(before);if(history.length>60)history.shift();future=[];mark();render();return true;}
 function macroSafe(){if(!current()){const m=M.macro('我的宏');doc.macros.push(m);selectedMacro=m.id;}if(!current().tracks.length)current().tracks.push(M.track('轨道 1'));if(!current().tracks.some(t=>t.id===selectedTrack))selectedTrack=current().tracks[0].id;}
-function load(workspace){const next=JSON.parse(workspace.content);if(next.schema_version!==3)throw Error('请使用多轨时间轴作品文件。旧版配置不会自动载入。');doc=next;path=workspace.path||'';selectedMacro=doc.macros[0]?.id||'';selectedBlock='';dirty=false;history=[];future=[];macroSafe();$('save-state').textContent='已保存';cursor=0;if(needsSplit())api()?.StopAll?.().catch(e=>tell(String(e),true));render();}
+function load(workspace){const next=JSON.parse(workspace.content);if(next.schema_version!==3)throw Error('请使用多轨时间轴作品文件。旧版配置不会自动载入。');next.macros.forEach(M.syncTiming);doc=next;path=workspace.path||'';selectedMacro=doc.macros[0]?.id||'';selectedBlock='';dirty=false;history=[];future=[];macroSafe();$('save-state').textContent='已保存';cursor=0;if(needsSplit())api()?.StopAll?.().catch(e=>tell(String(e),true));render();}
 function needsSplit(){return doc.macros.some(m=>m.tracks.some(M.trackOverlaps));}
-function labels(){for(const [id,text]of Object.entries({'library-label':'我的宏','palette-title':'动作积木','palette-hint':'拖到右侧轨道，放到想执行的时间。','palette-note':'同轨顺序，跨轨并行。\n空白的时间就是等待。','snap-label':'吸附','fit':'适应','track-label':'轨道 / 时间','add-track':'＋ 添加轨道','timeline-help':'拖动移动 · 拉右边缘改时长','length-label':'总长','preview-title':'只看效果，不发送按键','inspector-title':'宏属性','status-text':'准备就绪','shortcut-tip':'Pause 紧急停止','open-button':'打开','save-button':'保存','record-button':'● 录制','stop-button':'■ 停止','play-button':'▶ 运行','settings-button':'⚙ 窗口与设置','hide-button':'隐藏到托盘','quit-button':'退出工具','settings-title':'窗口与设置','detect-button':'读取游戏窗口','settings-done':'完成','settings-note':'宏只在匹配的窗口前台运行。切出窗口会停止并释放输入。录制后会生成可编辑的多轨作品。','target-button':'选择窗口'}))$(id).textContent=text;}
+function labels(){for(const [id,text]of Object.entries({'library-label':'我的宏','palette-title':'动作积木','palette-hint':'拖到右侧轨道，放到想执行的时间。','palette-note':'同轨顺序，跨轨并行。\n空白的时间就是等待。','snap-label':'吸附','fit':'适应','track-label':'轨道 / 时间','add-track':'＋ 添加轨道','timeline-help':'拖动移动 · 拉右边缘改时长','length-label':'动作','preview-title':'只看效果，不发送按键','inspector-title':'宏属性','status-text':'准备就绪','shortcut-tip':'Pause 紧急停止','open-button':'打开','save-button':'保存','record-button':'● 录制','stop-button':'■ 停止','play-button':'▶ 运行','settings-button':'⚙ 窗口与设置','hide-button':'隐藏到托盘','quit-button':'退出工具','settings-title':'窗口与设置','detect-button':'读取游戏窗口','settings-done':'完成','settings-note':'宏只在匹配的窗口前台运行。切出窗口会停止并释放输入。录制后会生成可编辑的多轨作品。','target-button':'选择窗口'}))$(id).textContent=text;}
 function renderLibrary(){
  $('macro-list').innerHTML=doc.macros.map(m=>`<button class="macro-item ${m.id===selectedMacro?'active':''}" data-macro="${esc(m.id)}"><span class="macro-icon">≋</span><span class="macro-info"><strong>${esc(m.name)}</strong><small>${m.tracks.length} 条轨道 · ${(m.duration_ms/1000).toFixed(1)}s${m.loop?' · 循环':''}</small></span>${m.trigger!=='none'?`<span class="macro-hotkey">${esc(keyName(m.trigger))}</span>`:''}</button>`).join('');
  document.querySelectorAll('[data-macro]').forEach(b=>b.onclick=()=>{selectedMacro=b.dataset.macro;selectedBlock='';cursor=0;stopPreview();cancelCapture();macroSafe();render();});
@@ -22,15 +22,16 @@ function renderLibrary(){
 function clipLabel(b){if(b.type==='move')return b.path?.length?`鼠标轨迹 · ${b.path.length} 点`:`移到 ${b.x}, ${b.y}`;if(b.type==='scroll')return b.delta>0?'向上滚动':'向下滚动';return `${keyName(b.key)} · ${types[b.type]?.name||b.type}`;}
 function positions(track){const ends=[],blocks=[...track.blocks].sort((a,b)=>a.at_ms-b.at_ms);return blocks.map((b,i)=>{const start=b.at_ms*scale,next=blocks[i+1];let width=Math.max(b.type==='scroll'?18:10,b.duration_ms*scale);if(next&&next.at_ms>=M.occupiedEnd(b))width=Math.min(width,(next.at_ms-b.at_ms)*scale);let row=ends.findIndex(end=>end<=start);if(row<0)row=ends.length;ends[row]=M.occupiedEnd(b)*scale;const caption=!next||(next.at_ms-b.at_ms)*scale>width+100;return {b,row,width,caption};});}
 function renderTimeline(){
- const m=current(),width=Math.max(m.duration_ms*scale+80,$('timeline-scroll').clientWidth-rail-2,600);$('timeline-canvas').style.width=`${width+rail}px`;
+ const m=current(),actionEnd=M.actionDuration(m),viewEnd=Math.max(3000,m.duration_ms+1000),width=Math.max(viewEnd*scale+80,$('timeline-scroll').clientWidth-rail-2,600);$('timeline-canvas').style.width=`${width+rail}px`;
  const tick=scale>.7?100:scale>.25?250:scale>.1?500:1000;
- let ticks='';for(let t=0;t<=m.duration_ms;t+=tick){ticks+=`<span class="ruler-tick" style="left:${t*scale}px">${(t/1000).toFixed(tick<1000?1:0)}s</span>`;if(tick*scale>50)ticks+=`<span class="ruler-tick minor" style="left:${(t+tick/2)*scale}px"></span>`;}
+ let ticks='';for(let t=0;t<=viewEnd;t+=tick){ticks+=`<span class="ruler-tick" style="left:${t*scale}px">${(t/1000).toFixed(tick<1000?1:0)}s</span>`;if(tick*scale>50)ticks+=`<span class="ruler-tick minor" style="left:${(t+tick/2)*scale}px"></span>`;}
  $('ruler').style.width=`${width}px`;$('ruler').innerHTML=ticks;
  $('tracks').innerHTML=m.tracks.map((t,i)=>{const items=positions(t),height=Math.max(96,(Math.max(0,...items.map(x=>x.row))+1)*43+26);return `<div class="track-row ${t.muted?'is-off':''}" data-track-row="${esc(t.id)}" style="height:${height}px"><div class="track-header"><div class="track-header-top"><span class="track-color" style="background:${['#78a7e8','#7ac4a5','#bb8ed4','#dfbd7d'][i%4]}"></span><input class="track-name" data-track-name="${esc(t.id)}" aria-label="轨道名称" value="${esc(t.name)}"><button data-track-toggle="${esc(t.id)}" class="track-switch" role="switch" aria-checked="${!t.muted}" aria-label="${esc(t.name)}：启用轨道" title="${t.muted?'开启轨道':'关闭轨道'}"><span class="track-switch-visual" aria-hidden="true"><span></span></span></button></div><div class="track-controls"><button data-track-up="${esc(t.id)}" ${i===0?'disabled':''} title="上移轨道" aria-label="上移轨道">↑</button><button data-track-down="${esc(t.id)}" ${i===m.tracks.length-1?'disabled':''} title="下移轨道" aria-label="下移轨道">↓</button><button data-track-remove="${esc(t.id)}" title="删除轨道" aria-label="删除轨道">×</button></div></div><div class="track-lane" data-lane="${esc(t.id)}" style="width:${width}px;background-size:${tick*scale}px 100%;height:${height}px">${!t.blocks.length?'<span class="track-empty">把动作拖到这里</span>':''}${items.map(({b,row,width,caption})=>`<div class="clip ${esc(b.type)} ${width<65?'compact':''} ${b.id===selectedBlock?'selected':''}" data-block="${esc(b.id)}" tabindex="0" role="button" aria-label="${esc(clipLabel(b))}，${b.at_ms}毫秒" title="${esc(clipLabel(b))} · ${b.at_ms}ms" style="left:${b.at_ms*scale}px;top:${15+row*43}px;width:${width}px;min-width:0"><span class="clip-symbol">${types[b.type]?.symbol||'•'}</span><span class="clip-label">${esc(clipLabel(b))}</span>${width>135?`<span class="clip-time">${b.duration_ms}ms</span>`:''}${width<65&&caption?`<span class="clip-caption">${esc(clipLabel(b))}</span>`:''}${['tap','hold','move'].includes(b.type)?'<span class="resize-handle" title="拖动改变时长"></span>':''}</div>`).join('')}</div></div>`;}).join('');
- $('duration-readout').textContent=m.duration_ms;$('loop-status').textContent=m.loop?'循环播放':'播放一次';$('zoom-label').textContent=`${Math.round(scale/.22*100)}%`;$('undo').disabled=!history.length;$('redo').disabled=!future.length;
+ $('duration-readout').textContent=actionEnd;$('cycle-summary').hidden=!m.loop;$('cycle-duration').textContent=m.duration_ms;$('loop-status').textContent=m.loop?'循环播放':'播放一次';$('zoom-label').textContent=`${Math.round(scale/.22*100)}%`;$('undo').disabled=!history.length;$('redo').disabled=!future.length;
+ const waiting=m.loop&&m.loop_wait_ms>0;$('loop-wait-region').hidden=!waiting;$('loop-wait-region').style.left=`${rail+actionEnd*scale}px`;$('loop-wait-region').style.width=`${m.loop_wait_ms*scale}px`;$('loop-wait-label').textContent=`等待 ${m.loop_wait_ms}ms`;$('timeline-end').hidden=!m.tracks.some(t=>t.blocks.length);$('timeline-end').style.left=`${rail+m.duration_ms*scale}px`;$('timeline-end').firstElementChild.textContent=m.loop?'本轮结束':'结束';
  bindTimeline();drawCursor();
 }
-function drawCursor(){const m=current();if(!m)return;cursor=Math.max(0,Math.min(cursor,m.duration_ms));$('playhead').style.left=`${rail+cursor*scale}px`;$('time-readout').textContent=`${(cursor/1000).toFixed(2)}s`;}
+function drawCursor(){const m=current();if(!m)return;cursor=Math.max(0,Math.min(cursor,M.maxDuration));$('playhead').style.left=`${rail+cursor*scale}px`;$('time-readout').textContent=`${(cursor/1000).toFixed(2)}s`;}
 function moveTrack(id,direction){
  const tracks=current().tracks,index=tracks.findIndex(t=>t.id===id),destination=index+direction;
  if(index<0||destination<0||destination>=tracks.length)return;
@@ -70,6 +71,7 @@ function field(id,label,value,type='number',min='0'){return `<label class="prope
 function renderInspector(){
  const m=current(),f=M.find(m,selectedBlock);
  $('inspector-title').textContent=f?'动作属性':'宏属性';
+ $('inspector-controls').replaceChildren();
  if(!f){renderMacroInspector(m);return;}
  const b=f.block;let html=`<div class="property-title"><span>${types[b.type].symbol}</span>${types[b.type].name}</div>`;
  if(['tap','hold'].includes(b.type))html+=`<label class="property-field">按键<div class="trigger-entry"><select id="block-key">${keyOptions(keys,b.key)}</select><button id="capture-block-key">录入</button></div></label>`;
@@ -78,7 +80,7 @@ function renderInspector(){
  if(b.type==='scroll')html+=field('block-delta','滚动量 · 正数向上 / 负数向下',b.delta,'number','-12000');
  html+=`<div class="inspector-actions"><button id="duplicate-block">复制</button><button id="remove-block" class="danger">删除</button></div>`;
  $('inspector').innerHTML=html;
- for(const [id,key]of [['block-at','at_ms'],['block-duration','duration_ms'],['block-x','x'],['block-y','y'],['block-from-x','from_x'],['block-from-y','from_y'],['block-delta','delta']])if($(id))$(id).onchange=e=>edit(()=>{if(key==='at_ms')M.move(m,b.id,f.track.id,Number(e.target.value),1);else if(key==='duration_ms')M.resize(m,b.id,Number(e.target.value),1);else b[key]=Number(e.target.value);m.duration_ms=Math.max(m.duration_ms,M.extent(b));if(b.type==='move'&&b.duration_ms>0){b.from_x??=0;b.from_y??=0;}});
+ for(const [id,key]of [['block-at','at_ms'],['block-duration','duration_ms'],['block-x','x'],['block-y','y'],['block-from-x','from_x'],['block-from-y','from_y'],['block-delta','delta']])if($(id))$(id).onchange=e=>edit(()=>{if(key==='at_ms')M.move(m,b.id,f.track.id,Number(e.target.value),1);else if(key==='duration_ms')M.resize(m,b.id,Number(e.target.value),1);else b[key]=Number(e.target.value);if(b.type==='move'&&b.duration_ms>0){b.from_x??=0;b.from_y??=0;}});
  if($('block-key'))$('block-key').onchange=e=>edit(()=>b.key=e.target.value);
  if($('capture-block-key'))$('capture-block-key').onclick=()=>beginCapture('key',key=>b.key=key);
  if($('straighten-path'))$('straighten-path').onclick=()=>edit(()=>delete b.path);
@@ -86,19 +88,19 @@ function renderInspector(){
  if($('pick-position'))$('pick-position').onclick=async()=>{if(!api()){tell('取点需要在桌面程序中使用。');return;}tell('请把鼠标移到目标位置，2 秒后读取。');try{const p=await api().CapturePosition();edit(()=>{b.x=p.X;b.y=p.Y;});tell('已读取目标位置。');}catch(e){tell(String(e),true);}};
 }
 function renderMacroInspector(m){
+ $('inspector-controls').innerHTML=`<button id="macro-enabled" type="button" class="track-switch" role="switch" aria-checked="${m.enabled}" aria-label="启用此宏" title="${m.enabled?'停用此宏':'启用此宏'}"><span class="track-switch-visual" aria-hidden="true"><span></span></span></button>`;
  $('inspector').innerHTML=`${field('macro-name-input','宏名称',m.name,'text')}
  <label class="property-field">启动快捷键<div class="trigger-entry"><select id="macro-trigger">${keyOptions(['none',...triggers],m.trigger)}</select><button id="capture-trigger">录入</button></div></label>
- <label class="property-field checkbox"><input id="macro-enabled" type="checkbox" ${m.enabled?'checked':''}>允许快捷键启动</label>
  <label class="property-field checkbox"><input id="loop" type="checkbox" ${m.loop?'checked':''}>循环播放</label>
- ${field('duration','时间轴总长 · ms',m.duration_ms,'number','1')}
+ <label class="property-field">动作时长（自动）<output id="macro-duration">${M.actionDuration(m)} ms</output></label>
+ ${m.loop?field('loop-wait','每轮结束后等待 · ms',m.loop_wait_ms):''}
  <p class="property-note">快捷键启动整个宏；循环时再按一次停止。选中动作块可修改该动作的属性。</p>
  <div class="inspector-actions"><button id="duplicate-macro">复制宏</button><button id="remove-macro" class="danger">删除宏</button></div>`;
  $('macro-name-input').onchange=e=>edit(()=>m.name=e.target.value);
  $('macro-trigger').onchange=e=>edit(()=>m.trigger=e.target.value);
- $('macro-enabled').onchange=e=>edit(()=>m.enabled=e.target.checked);
+ $('macro-enabled').onclick=()=>{edit(()=>m.enabled=!m.enabled);$('macro-enabled').focus({preventScroll:true});};
  $('loop').onchange=e=>edit(()=>m.loop=e.target.checked);
- $('duration').max='3600000';
- $('duration').onchange=e=>edit(()=>M.setDuration(m,Number(e.target.value)));
+ if($('loop-wait')){$('loop-wait').max=String(M.maxDuration-M.actionDuration(m));$('loop-wait').onchange=e=>edit(()=>M.setLoopWait(m,Number(e.target.value)));}
  $('capture-trigger').onclick=()=>beginCapture('trigger',key=>m.trigger=key);
  $('duplicate-macro').onclick=()=>edit(()=>{const copy=structuredClone(m);copy.id=M.id('macro');copy.name+=' 副本';while(doc.macros.some(n=>n.name===copy.name))copy.name+=' 副本';copy.trigger='none';for(const t of copy.tracks){t.id=M.id('track');for(const b of t.blocks)b.id=M.id('block');}doc.macros.push(copy);selectedMacro=copy.id;selectedBlock='';});
  $('remove-macro').onclick=()=>edit(()=>{doc.macros=doc.macros.filter(n=>n.id!==m.id);selectedMacro=doc.macros[0]?.id||'';selectedBlock='';macroSafe();});
@@ -121,7 +123,7 @@ $('new-macro').onclick=()=>edit(()=>{let name='新宏';let n=2;while(doc.macros.
 $('add-track').onclick=()=>edit(()=>{if(current().tracks.length>=64){tell('最多 64 条轨道。');return;}const t=M.track(`轨道 ${current().tracks.length+1}`);current().tracks.push(t);selectedTrack=t.id;});
 $('undo').onclick=()=>{if(!history.length)return;future.push(JSON.stringify(doc));doc=JSON.parse(history.pop());selectedBlock='';mark();render();};
 $('redo').onclick=()=>{if(!future.length)return;history.push(JSON.stringify(doc));doc=JSON.parse(future.pop());selectedBlock='';mark();render();};
-$('zoom-in').onclick=()=>zoomTimeline(scale*1.3);$('zoom-out').onclick=()=>zoomTimeline(scale/1.3);$('fit').onclick=()=>{scale=Math.max(.02,Math.min(3,($('timeline-scroll').clientWidth-rail-55)/current().duration_ms));renderTimeline();};
+$('zoom-in').onclick=()=>zoomTimeline(scale*1.3);$('zoom-out').onclick=()=>zoomTimeline(scale/1.3);$('fit').onclick=()=>{scale=Math.max(.02,Math.min(3,($('timeline-scroll').clientWidth-rail-55)/Math.max(1000,current().duration_ms+200)));renderTimeline();};
 $('timeline-scroll').addEventListener('wheel',e=>{
  if(!e.ctrlKey)return;
  e.preventDefault();if(pointer||!e.deltaY)return;

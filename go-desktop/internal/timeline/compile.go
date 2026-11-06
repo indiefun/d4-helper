@@ -12,9 +12,10 @@ import (
 // use reference counts, so an earlier block cannot release a later block's key.
 // Every key block generates its own press and release events.
 func Compile(m Definition) (sequence.Plan, error) {
-	p := sequence.Plan{Duration: time.Duration(m.DurationMS) * time.Millisecond, Loop: m.Loop}
-	if m.DurationMS < 1 || m.DurationMS > 3600000 {
-		return p, fmt.Errorf("作品长度应为 1ms–1 小时")
+	_, duration, err := m.timing()
+	p := sequence.Plan{Duration: time.Duration(duration) * time.Millisecond, Loop: m.Loop}
+	if err != nil {
+		return p, err
 	}
 	if len(m.Tracks) > 64 {
 		return p, fmt.Errorf("最多支持 64 条轨道")
@@ -47,12 +48,6 @@ func Compile(m Definition) (sequence.Plan, error) {
 				return p, fmt.Errorf("动作 ID 重复或为空")
 			}
 			ids[b.ID] = true
-			if b.AtMS < 0 || b.DurationMS < 0 || b.AtMS+b.DurationMS > m.DurationMS {
-				return p, fmt.Errorf("动作超出时间轴范围")
-			}
-			if b.AtMS > m.DurationMS || b.DurationMS > m.DurationMS {
-				return p, fmt.Errorf("动作超出时间轴范围")
-			}
 			if (b.X == nil) != (b.Y == nil) || (b.FromX == nil) != (b.FromY == nil) {
 				return p, fmt.Errorf("鼠标坐标 X/Y 必须成对")
 			}

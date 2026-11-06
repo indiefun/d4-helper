@@ -21,33 +21,75 @@ test('inspector switches between the selected macro and action without mixing th
  try{
   assert.equal(d.getElementById('inspector-title').textContent,'宏属性');
   assert.equal(d.getElementById('block-key'),null);
+  d.getElementById('macro-enabled').click();
+  assert.equal(d.getElementById('macro-enabled').getAttribute('aria-checked'),'false');
+  d.getElementById('undo').click();
+  assert.equal(d.getElementById('macro-enabled').getAttribute('aria-checked'),'true');
+  d.getElementById('macro-enabled').click();
   d.getElementById('macro-name-input').value='测试宏';d.getElementById('macro-name-input').dispatchEvent(new a.dom.window.Event('change'));
   d.getElementById('macro-trigger').value='f3';d.getElementById('macro-trigger').dispatchEvent(new a.dom.window.Event('change'));
   d.getElementById('loop').checked=true;d.getElementById('loop').dispatchEvent(new a.dom.window.Event('change'));
-  d.getElementById('duration').value=2500;d.getElementById('duration').dispatchEvent(new a.dom.window.Event('change'));
+  d.getElementById('loop-wait').value=1100;d.getElementById('loop-wait').dispatchEvent(new a.dom.window.Event('change'));
   assert.equal(d.getElementById('macro-name').textContent,'测试宏');
   assert.equal(d.getElementById('loop-status').textContent,'循环播放');
-  assert.equal(d.getElementById('duration-readout').textContent,'2500');
+  assert.equal(d.getElementById('duration-readout').textContent,'1400');assert.equal(d.getElementById('cycle-duration').textContent,'2500');
   d.querySelector('.clip.tap').dispatchEvent(new a.dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
   assert.equal(d.getElementById('inspector-title').textContent,'动作属性');
   assert.ok(d.getElementById('block-key'));
-  for(const id of ['macro-name-input','macro-trigger','macro-enabled','loop','duration','duplicate-macro','remove-macro','block-repeat'])assert.equal(d.getElementById(id),null,id);
+  for(const id of ['macro-name-input','macro-trigger','macro-enabled','loop','loop-wait','duration','duplicate-macro','remove-macro','block-repeat'])assert.equal(d.getElementById(id),null,id);
   d.getElementById('block-duration').value=80;d.getElementById('block-duration').dispatchEvent(new a.dom.window.Event('change'));
   d.querySelector('[data-macro]').click();
   assert.equal(d.getElementById('inspector-title').textContent,'宏属性');
   assert.equal(d.getElementById('macro-trigger').value,'f3');
   assert.equal(d.getElementById('loop').checked,true);
-  assert.equal(d.getElementById('duration').value,'2500');
+  assert.equal(d.getElementById('loop-wait').value,'1100');
+  assert.equal(d.getElementById('macro-enabled').getAttribute('aria-checked'),'false');
   assert.equal(d.getElementById('block-key'),null);
   d.getElementById('save-button').click();await new Promise(resolve=>setImmediate(resolve));
   assert.equal(a.saved().macros[0].tracks[0].blocks[0].duration_ms,80);
   assert.equal(a.saved().macros[0].loop,true);
+  assert.equal(a.saved().macros[0].enabled,false);
  }finally{a.dom.window.close();}
 });
 
 test('a click previews once even when an imported draft contains obsolete repeat metadata',async()=>{
  const a=await editor();
  try{const m=a.M.macro('test');m.loop=true;m.tracks[0].blocks=[{...a.M.block('tap',100),repeat_ms:100}];const events=a.M.flatten(m);assert.equal(events.length,2);assert.equal(events[0].at_ms,100);assert.equal(events[1].at_ms,160);}finally{a.dom.window.close();}
+});
+
+test('automatic duration shrinks with edits and deletion while loop waits remain separate',async()=>{
+ const a=await editor(),d=a.d;
+ try{
+  assert.equal(d.getElementById('duration'),null);assert.equal(d.getElementById('loop-wait'),null);
+  d.querySelector('.clip.hold').dispatchEvent(new a.dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+  d.getElementById('block-duration').value=200;d.getElementById('block-duration').dispatchEvent(new a.dom.window.Event('change'));
+  assert.equal(d.getElementById('duration-readout').textContent,'860');
+  d.querySelectorAll('.clip.tap')[1].dispatchEvent(new a.dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+  d.getElementById('remove-block').click();assert.equal(d.getElementById('duration-readout').textContent,'400');
+  d.getElementById('undo').click();assert.equal(d.getElementById('duration-readout').textContent,'860');
+  d.querySelector('[data-macro]').click();d.getElementById('loop').checked=true;d.getElementById('loop').dispatchEvent(new a.dom.window.Event('change'));
+  d.getElementById('loop-wait').value=500;d.getElementById('loop-wait').dispatchEvent(new a.dom.window.Event('change'));
+  assert.equal(d.getElementById('cycle-duration').textContent,'1360');assert.equal(d.getElementById('loop-wait-region').hidden,false);
+  d.getElementById('loop').checked=false;d.getElementById('loop').dispatchEvent(new a.dom.window.Event('change'));
+  assert.equal(d.getElementById('loop-wait'),null);assert.equal(d.getElementById('loop-wait-region').hidden,true);
+  d.getElementById('loop').checked=true;d.getElementById('loop').dispatchEvent(new a.dom.window.Event('change'));
+  assert.equal(d.getElementById('loop-wait').value,'500');
+  d.getElementById('save-button').click();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(a.saved().macros[0].duration_ms,1360);assert.equal(a.saved().macros[0].loop_wait_ms,500);
+ }finally{a.dom.window.close();}
+});
+
+test('old loop timing migrates once and empty canvas can place actions beyond execution end',async()=>{
+ const a=await editor(doc=>{const m=doc.macros[0];delete m.loop_wait_ms;m.loop=true;m.duration_ms=2000;}),d=a.d;
+ try{
+  assert.equal(d.getElementById('loop-wait').value,'600');assert.equal(d.getElementById('cycle-duration').textContent,'2000');
+  d.getElementById('new-macro').click();const lane=d.querySelector('.track-lane');lane.getBoundingClientRect=()=>({left:100});
+  lane.onpointerdown({target:lane,clientX:540});
+  d.querySelector('[data-action="tap"]').click();
+  assert.equal(d.getElementById('block-at').value,'2000');assert.equal(d.getElementById('duration-readout').textContent,'2060');
+  d.getElementById('save-button').click();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(a.saved().macros[0].loop_wait_ms,600);assert.equal(a.saved().macros[1].loop_wait_ms,0);
+ }finally{a.dom.window.close();}
 });
 
 test('new macro starts with one empty track and saves paired arrow-key actions',async()=>{const a=await editor();try{a.d.getElementById('new-macro').click();assert.equal(a.d.querySelectorAll('.track-lane').length,1);assert.equal(a.d.querySelectorAll('.clip').length,0);a.d.querySelector('[data-action="tap"]').click();a.d.getElementById('block-key').value='up';a.d.getElementById('block-key').dispatchEvent(new a.dom.window.Event('change'));a.d.getElementById('save-button').click();await new Promise(resolve=>setImmediate(resolve));const m=a.saved().macros[1];assert.equal(m.tracks.length,1);assert.equal(m.tracks[0].blocks[0].type,'tap');assert.equal(m.tracks[0].blocks[0].key,'up');assert.deepEqual(Array.from(a.M.flatten(m),e=>e.type),['key_down','key_up']);}finally{a.dom.window.close();}});
@@ -163,8 +205,10 @@ test('out-of-range timing edits reject atomically instead of rendering an unboun
   const m=a.M.macro(),t=m.tracks[0],b=a.M.place(m,'tap',t.id,100,1),before=JSON.stringify(m);
   for(const at of [3600000,Infinity,NaN])assert.throws(()=>a.M.move(m,b.id,t.id,at,1),/1 小时/);
   for(const duration of [3600000,Infinity,NaN])assert.throws(()=>a.M.resize(m,b.id,duration,1),/1 小时/);
-  assert.throws(()=>a.M.setDuration(m,3600001),/1 小时/);assert.equal(JSON.stringify(m),before);
-  d.getElementById('duration').value='3600001';d.getElementById('duration').dispatchEvent(new a.dom.window.Event('change'));
-  assert.equal(d.getElementById('duration').value,'2000');assert.ok(d.getElementById('undo').disabled);
+  assert.throws(()=>a.M.setLoopWait(m,3600001),/1 小时/);assert.equal(JSON.stringify(m),before);
+  d.getElementById('loop').checked=true;d.getElementById('loop').dispatchEvent(new a.dom.window.Event('change'));
+  d.getElementById('loop-wait').value='3600001';d.getElementById('loop-wait').dispatchEvent(new a.dom.window.Event('change'));
+  assert.equal(d.getElementById('loop-wait').value,'0');assert.equal(d.getElementById('duration-readout').textContent,'1400');
+  d.getElementById('undo').click();assert.equal(d.getElementById('loop').checked,false);assert.equal(d.getElementById('loop-wait'),null);
  }finally{a.dom.window.close();}
 });

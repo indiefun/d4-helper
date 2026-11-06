@@ -47,6 +47,7 @@ type Definition struct {
 	Trigger    string  `json:"trigger"`
 	DurationMS int64   `json:"duration_ms"`
 	Loop       bool    `json:"loop"`
+	LoopWaitMS int64   `json:"loop_wait_ms"`
 	Tracks     []Track `json:"tracks"`
 }
 type Config struct {
@@ -73,7 +74,7 @@ func NewID(prefix string) string {
 }
 func Default() Config {
 	return Config{Version: 3, WindowTitle: "暗黑破坏神IV", Process: "Diablo IV.exe", Overlay: true, Opacity: .6, AvoidMouse: true, AvoidDistance: 72, RecordingTrigger: "f12", Countdown: 3, MaxSeconds: 60, EmergencyTrigger: "pause", Macros: []Definition{
-		{ID: "starter", Name: "我的第一个宏", Enabled: true, Trigger: "f1", DurationMS: 2000, Tracks: []Track{
+		{ID: "starter", Name: "我的第一个宏", Enabled: true, Trigger: "f1", DurationMS: 1400, Tracks: []Track{
 			{ID: "track_main", Name: "技能", Blocks: []Block{
 				{ID: "sample_click", Type: "tap", Key: "2", AtMS: 200, DurationMS: 60},
 				{ID: "sample_click2", Type: "tap", Key: "1", AtMS: 800, DurationMS: 60},
@@ -117,16 +118,6 @@ func normalize(raw string, editing bool) (string, Config, error) {
 	if editing {
 		check.Macros = make([]Definition, len(c.Macros))
 		for i, m := range c.Macros {
-			if m.DurationMS < 1 || m.DurationMS > 3600000 {
-				return "", c, fmt.Errorf("作品长度应为 1ms–1 小时")
-			}
-			for _, t := range m.Tracks {
-				for _, b := range t.Blocks {
-					if b.AtMS < 0 || b.DurationMS < 0 || b.AtMS > m.DurationMS || b.DurationMS > m.DurationMS {
-						return "", c, fmt.Errorf("动作超出时间轴范围")
-					}
-				}
-			}
 			var err error
 			check.Macros[i], _, err = SplitTracks(m)
 			if err != nil {
@@ -193,7 +184,7 @@ func (c Config) Runtime() (engine.Config, error) {
 	return r, r.Validate()
 }
 func FromRecording(events []sequence.RecordedEvent) Definition {
-	m := Definition{ID: NewID("macro"), Name: "新录制", Enabled: true, Trigger: "none", DurationMS: 2000, Tracks: []Track{}}
+	m := Definition{ID: NewID("macro"), Name: "新录制", Enabled: true, Trigger: "none", DurationMS: 1, Tracks: []Track{}}
 	lanes := map[string]int{}
 	down := map[string]sequence.RecordedEvent{}
 	add := func(key string, b Block) {
@@ -205,9 +196,7 @@ func FromRecording(events []sequence.RecordedEvent) Definition {
 		}
 		m.Tracks[index].Blocks = append(m.Tracks[index].Blocks, b)
 		end := b.AtMS + b.DurationMS
-		if end+200 > m.DurationMS {
-			m.DurationMS = end + 200
-		}
+		m.DurationMS = max(m.DurationMS, end)
 	}
 	var stroke []sequence.RecordedEvent
 	flushStroke := func() {

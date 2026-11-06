@@ -107,7 +107,7 @@ func TestLegacyRepeatMetadataDoesNotGenerateExtraClicks(t *testing.T) {
 }
 func TestConflictingMovementAndOutOfBoundsRejected(t *testing.T) {
 	x, y := 1, 2
-	m := one(Track{ID: "a", Blocks: []Block{{ID: "bad", Type: "tap", Key: "f", AtMS: 1999, DurationMS: 20}}})
+	m := one(Track{ID: "a", Blocks: []Block{{ID: "bad", Type: "tap", Key: "f", AtMS: MaxDurationMS - 1, DurationMS: 20}}})
 	if _, err := Compile(m); err == nil {
 		t.Fatal("out of bounds accepted")
 	}
