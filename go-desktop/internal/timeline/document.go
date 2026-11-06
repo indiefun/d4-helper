@@ -74,15 +74,27 @@ func NewID(prefix string) string {
 func Default() Config {
 	return Config{Version: 3, WindowTitle: "暗黑破坏神IV", Process: "Diablo IV.exe", Overlay: true, Opacity: .6, AvoidMouse: true, AvoidDistance: 72, RecordingTrigger: "f12", Countdown: 3, MaxSeconds: 60, EmergencyTrigger: "pause", Macros: []Definition{
 		{ID: "starter", Name: "我的第一个宏", Enabled: true, Trigger: "f1", DurationMS: 2000, Tracks: []Track{
-			{ID: "track_main", Name: "轨道 1", Blocks: []Block{
+			{ID: "track_main", Name: "技能", Blocks: []Block{
 				{ID: "sample_click", Type: "tap", Key: "2", AtMS: 200, DurationMS: 60},
 				{ID: "sample_click2", Type: "tap", Key: "1", AtMS: 800, DurationMS: 60},
+			}},
+			{ID: "track_mouse", Name: "鼠标", Blocks: []Block{
 				{ID: "sample_hold", Type: "hold", Key: "right", AtMS: 200, DurationMS: 1200},
 			}},
 		}},
 	}}
 }
 func Normalize(raw string) (string, Config, error) {
+	return normalize(raw, false)
+}
+
+// ReadForEditing also accepts overlapping schema-3 tracks. Their split copy
+// must pass all other validations; the original remains disarmed until saved.
+func ReadForEditing(raw string) (string, Config, error) {
+	return normalize(raw, true)
+}
+
+func normalize(raw string, editing bool) (string, Config, error) {
 	var header struct {
 		Version int `json:"schema_version"`
 	}
@@ -101,7 +113,28 @@ func Normalize(raw string) (string, Config, error) {
 	if c.Macros == nil {
 		return "", c, fmt.Errorf("作品列表必须是数组")
 	}
-	if _, err := c.Runtime(); err != nil {
+	check := c
+	if editing {
+		check.Macros = make([]Definition, len(c.Macros))
+		for i, m := range c.Macros {
+			if m.DurationMS < 1 || m.DurationMS > 3600000 {
+				return "", c, fmt.Errorf("作品长度应为 1ms–1 小时")
+			}
+			for _, t := range m.Tracks {
+				for _, b := range t.Blocks {
+					if b.AtMS < 0 || b.DurationMS < 0 || b.AtMS > m.DurationMS || b.DurationMS > m.DurationMS {
+						return "", c, fmt.Errorf("动作超出时间轴范围")
+					}
+				}
+			}
+			var err error
+			check.Macros[i], _, err = SplitTracks(m)
+			if err != nil {
+				return "", c, err
+			}
+		}
+	}
+	if _, err := check.Runtime(); err != nil {
 		return "", c, err
 	}
 	b, err := json.Marshal(c)
@@ -214,5 +247,8 @@ func FromRecording(events []sequence.RecordedEvent) Definition {
 		}
 	}
 	flushStroke()
+	if split, _, err := SplitTracks(m); err == nil {
+		m = split
+	}
 	return m
 }

@@ -43,7 +43,7 @@ func TestTimelineSaveReloadAndRuntime(t *testing.T) {
 		t.Fatal("saving did not rearm macro shortcuts", err)
 	}
 	_, cfg, err := timeline.Normalize(w.Content)
-	if err != nil || cfg.Version != 3 || len(cfg.Macros[0].Tracks) != 1 {
+	if err != nil || cfg.Version != 3 || len(cfg.Macros[0].Tracks) != 2 {
 		t.Fatal("timeline save lost tracks", err)
 	}
 	p, err := a.PreviewMacro(raw, cfg.Macros[0].ID)
@@ -62,5 +62,46 @@ func TestLegacyFileIsExplicitlyRejectedWithoutModification(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	if string(after) != raw {
 		t.Fatal("legacy file changed")
+	}
+}
+
+func TestOverlappingWorkspaceLoadsDisarmedAndOnlyChangesOnSave(t *testing.T) {
+	cfg := timeline.Default()
+	cfg.Macros[0].Tracks[0].Blocks = append(cfg.Macros[0].Tracks[0].Blocks, cfg.Macros[0].Tracks[1].Blocks...)
+	cfg.Macros[0].Tracks = cfg.Macros[0].Tracks[:1]
+	raw, _ := json.Marshal(cfg)
+	path := filepath.Join(t.TempDir(), "workspace.timeline.json")
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := NewApp(path)
+	a.dry = true
+	a.startup(context.Background())
+	defer a.shutdown(context.Background())
+	if _, err := a.LoadConfiguration(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := a.worker.Snapshot()
+	if err != nil || snapshot.Armed {
+		t.Fatal("overlapping workspace was armed", err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != string(raw) {
+		t.Fatal("loading rewrote workspace")
+	}
+	if _, err := a.SaveAndApply(string(raw)); err == nil {
+		t.Fatal("saved overlaps")
+	}
+	cfg.Macros[0], _, err = timeline.SplitTracks(cfg.Macros[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	repaired, _ := json.Marshal(cfg)
+	if _, err := a.SaveAndApply(string(repaired)); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = a.worker.Snapshot()
+	if err != nil || !snapshot.Armed {
+		t.Fatal("repaired workspace was not armed", err)
 	}
 }

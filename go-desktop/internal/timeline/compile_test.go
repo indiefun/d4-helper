@@ -111,7 +111,7 @@ func TestConflictingMovementAndOutOfBoundsRejected(t *testing.T) {
 	if _, err := Compile(m); err == nil {
 		t.Fatal("out of bounds accepted")
 	}
-	m = one(Track{ID: "a", Blocks: []Block{{ID: "move1", Type: "move", DurationMS: 100, X: &x, Y: &y, FromX: &x, FromY: &y}, {ID: "move2", Type: "move", AtMS: 50, DurationMS: 100, X: &x, Y: &y, FromX: &x, FromY: &y}}})
+	m = one(Track{ID: "a", Blocks: []Block{{ID: "move1", Type: "move", DurationMS: 100, X: &x, Y: &y, FromX: &x, FromY: &y}}}, Track{ID: "b", Blocks: []Block{{ID: "move2", Type: "move", AtMS: 50, DurationMS: 100, X: &x, Y: &y, FromX: &x, FromY: &y}}})
 	if _, err := Compile(m); err == nil {
 		t.Fatal("conflicting pointer paths accepted")
 	}

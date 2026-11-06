@@ -70,25 +70,21 @@ jobs:
 
       - name: Prepare portable release assets
         shell: pwsh
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $versionedArchive = ".\dist\D4Helper-Studio-v$env:VERSION.zip"
-          if (-not (Test-Path -LiteralPath $versionedArchive)) {
-            throw "Portable archive was not created: $versionedArchive"
+          $archive = '.\dist\go\D4Helper-Studio.zip'
+          if (-not (Test-Path -LiteralPath $archive)) {
+            throw "Portable archive was not created: $archive"
           }
-          Copy-Item -LiteralPath $versionedArchive -Destination ".\dist\D4Helper-windows-latest.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: D4Helper-windows-latest
           path: |
-            dist/studio/D4Helper.exe
-            dist/studio/workspace.timeline.json
-            dist/studio/VERSION
-            dist/D4Helper-Studio-v*.zip
-            dist/D4Helper-windows-latest.zip
+            dist/go/D4Helper.exe
+            dist/go/workspace.timeline.json
+            dist/go/VERSION
+            dist/go/D4Helper-Studio.zip
 
       - name: Create GitHub release
         if: github.ref_type == 'tag'
@@ -98,4 +94,4 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           files: |
-            dist/D4Helper-windows-latest.zip
+            dist/go/D4Helper-Studio.zip

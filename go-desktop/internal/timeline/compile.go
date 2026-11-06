@@ -133,6 +133,9 @@ func Compile(m Definition) (sequence.Plan, error) {
 				}
 			}
 		}
+		if trackOverlaps(track) {
+			return p, fmt.Errorf("轨道“%s”中有重叠动作，请拆分到不同轨道", track.Name)
+		}
 	}
 	sort.SliceStable(points, func(i, j int) bool {
 		if points[i].at != points[j].at {

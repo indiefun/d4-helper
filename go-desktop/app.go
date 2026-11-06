@@ -376,7 +376,7 @@ func (a *App) load(path string) (Workspace, error) {
 	if err != nil {
 		return Workspace{}, err
 	}
-	normalized, _, err := timeline.Normalize(string(data))
+	normalized, _, err := timeline.ReadForEditing(string(data))
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -406,6 +406,12 @@ func (a *App) ImportConfiguration() (Workspace, error) {
 		return Workspace{}, err
 	}
 	if err := a.ApplyConfiguration(workspace.Content); err != nil {
+		// load accepts old overlapping tracks for editing only. They stay
+		// disarmed until the user splits the tracks and saves.
+		if _, _, validation := timeline.Normalize(workspace.Content); validation != nil {
+			_ = a.StopAll()
+			return workspace, nil
+		}
 		return Workspace{}, err
 	}
 	if err := a.SetArmed(true); err != nil {
