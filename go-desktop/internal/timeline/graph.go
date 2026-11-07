@@ -9,9 +9,11 @@ import (
 // Graph describes finish-to-start dependencies. Parallel starts every output;
 // join waits for every input. Loops belong to the macro, never to graph cycles.
 type Graph struct {
-	Version int    `json:"version"`
-	Nodes   []Node `json:"nodes"`
-	Edges   []Edge `json:"edges"`
+	Version  int       `json:"version"`
+	Nodes    []Node    `json:"nodes,omitempty"`
+	Edges    []Edge    `json:"edges,omitempty"`
+	Root     *FlowNode `json:"root,omitempty"`
+	SourceV1 *Graph    `json:"source_v1,omitempty"`
 }
 type Node struct {
 	ID     string  `json:"id"`
@@ -30,6 +32,9 @@ type Edge struct {
 const MaxGraphNodes = 4096
 
 func graphTracks(g *Graph) ([]Track, int64, error) {
+	if g.Version == 2 {
+		return flowTracks(g.Root)
+	}
 	if g.Version != 1 || len(g.Nodes) == 0 || len(g.Nodes) > MaxGraphNodes || len(g.Edges) > MaxGraphNodes*2 {
 		return nil, 0, fmt.Errorf("节点图格式无效或超过 4096 个节点")
 	}

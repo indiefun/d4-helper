@@ -1,37 +1,61 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>D4Helper · 节点工作台</title><link rel="stylesheet" href="style.css"></head>
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+ <title>D4Helper · 节点工作台</title>
+ <link rel="stylesheet" href="style.css">
+</head>
 <body>
-<div class="studio">
- <aside class="sidebar">
-  <div class="brand"><span class="brand-mark">D4</span><div><strong>D4Helper</strong><small>FLOW STUDIO</small></div><span class="alpha">试用</span></div>
-  <div class="section-label">我的流程 <button id="new-macro" aria-label="新建流程" title="新建流程">＋</button></div><nav id="macro-list"></nav>
-  <div class="section-label node-heading">添加节点 <kbd>双击画布</kbd></div><p class="sidebar-hint">点击接在选中节点后，也可拖入画布。</p>
-  <div id="node-library"></div>
-  <div class="sidebar-bottom"><button id="settings-button">⚙ 窗口与设置</button><div><button id="hide-button">隐藏到托盘</button><button id="quit-button">退出</button></div></div>
+<div class="app">
+ <nav class="rail" aria-label="工作台工具栏">
+  <div class="brand" title="D4Helper">D4<span>●</span></div>
+  <button data-drawer="macros" title="宏管理" aria-label="宏管理" aria-expanded="false"><span>▤</span><small>宏</small></button>
+  <button data-drawer="nodes" title="节点库" aria-label="节点库" aria-expanded="false"><span>⊞</span><small>节点</small></button>
+  <div class="rail-spacer"></div>
+  <button id="help-button" title="交互说明" aria-label="交互说明"><span>?</span><small>帮助</small></button>
+  <button id="settings-button" title="窗口设置" aria-label="窗口设置"><span>⚙</span><small>设置</small></button>
+  <button id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘"><span>↙</span><small>托盘</small></button><button id="quit-button" title="退出工具" aria-label="退出工具"><span>⏻</span><small>退出</small></button>
+ </nav>
+ <aside id="drawer" hidden aria-label="工具抽屉">
+  <div class="drawer-heading"><div><span id="drawer-eyebrow">LIBRARY</span><h2 id="drawer-title">节点库</h2></div><button id="close-drawer" class="icon" aria-label="收起抽屉" title="收起抽屉">‹</button></div>
+  <section id="macros-drawer" hidden>
+   <button id="new-macro" class="new-button">＋ 新建宏</button>
+   <div class="drawer-label">工作区 <span id="macro-count"></span></div><div id="macro-list"></div>
+   <div class="drawer-note"><span>按工作内容切换</span><p>这里管理宏。添加动作时，打开「节点」抽屉。</p></div>
+  </section>
+  <section id="nodes-drawer" hidden>
+   <label class="search"><span>⌕</span><input id="node-search" placeholder="搜索动作…" aria-label="搜索动作"><kbd>/</kbd></label>
+   <div class="drawer-label">基础动作 <span>5</span></div><div id="node-library"></div>
+   <div class="insertion-note"><span class="small-dot"></span><span id="insertion-label">添加到流程末尾</span></div>
+   <div class="drawer-note"><span>并行和循环，直接在画布上设置</span><p>选中动作，点「同时执行」或「重复这一段」。边框会标出作用范围。</p></div>
+  </section>
+  <div class="drawer-footer"><span class="small-dot"></span> 保存后回到目标窗口，按快捷键运行</div>
  </aside>
  <main>
-  <header><div class="title-wrap"><div class="eyebrow">NODE WORKSPACE <span>/</span> 节点工作台</div><h1 id="macro-name"></h1></div><div class="header-actions"><span id="save-state">未保存</span><button id="open-button">打开</button><button id="save-button" class="primary">保存流程 <kbd>Ctrl S</kbd></button></div></header>
-  <div class="runbar"><button id="target-button" class="target"><span id="target-dot"></span><span id="target-label">选择游戏窗口</span><span class="target-edit">↗</span></button><div class="run-actions"><button id="record-button">● 录制</button><button id="stop-button">■ 停止</button><button id="play-button" class="primary">▷ 运行流程</button></div></div>
-  <div id="notice" class="notice" role="status" hidden></div>
-  <div class="workarea">
-   <section class="editor" aria-label="节点编辑器">
-    <div class="canvas-toolbar"><div class="toolbar-group"><span class="flow-indicator"></span><span id="flow-summary"></span></div><div class="toolbar-group"><button id="undo" aria-label="撤销" title="撤销 Ctrl Z">↶</button><button id="redo" aria-label="重做" title="重做 Ctrl Shift Z">↷</button><span class="separator"></span><button id="layout" title="自动整理节点">自动整理</button><button id="fit" title="显示全部节点">适应画布</button></div></div>
-    <div id="graph-viewport" tabindex="0" aria-label="流程画布，滚轮缩放，拖动空白平移">
-     <div id="graph-world"><svg id="graph-edges" aria-label="节点连线"></svg><div id="graph-nodes"></div></div>
-     <div class="canvas-guide"><span class="guide-icon">⑂</span><strong>把操作连起来，就是一个流程。</strong><span>从右侧圆点拖到下一节点的左侧圆点</span></div>
-     <div class="canvas-corner"><button id="zoom-out" aria-label="缩小">−</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="放大">＋</button></div>
-     <div id="minimap" aria-label="流程缩略图" title="点击适应全部节点"></div>
-    </div>
-    <div class="canvas-footer"><span id="canvas-hint">拖动空白平移 · 滚轮缩放 · Delete 删除 · 双击添加</span><span id="node-count"></span></div>
-    <div class="preview-panel"><div class="preview-header"><button id="preview-button" aria-label="预览流程">▷</button><div><strong>流程预览</strong><small>只看顺序，不发送按键</small></div><span id="preview-time">0.00 s</span><span id="duration-summary"></span></div><div id="preview-strip"></div><div id="validation" role="status"></div></div>
-   </section>
-   <aside class="inspector"><div class="inspector-heading"><span class="eyebrow">DETAILS</span><h2 id="inspector-title">流程设置</h2></div><div id="inspector"></div><div class="inspector-tip"><span>小提示</span><p id="inspector-tip">连线决定执行顺序，节点摆放位置不会影响时间。</p></div></aside>
-  </div>
-  <footer><span id="status-text">准备就绪</span><span id="record-status"></span><span id="shortcut-tip">Pause 紧急停止</span></footer>
+  <header class="topbar">
+   <div class="workspace-title"><div class="eyebrow">D4HELPER <span>/</span> 工作台 <b>节点工作台</b></div><div class="title-row"><button id="macro-title" title="重命名当前宏"></button><span id="saved-state">已就绪</span></div></div>
+   <div class="top-actions"><button id="open-button" class="quiet">打开</button><button id="macro-options" class="quiet">宏设置</button><button id="record-button" class="quiet">● 录制</button><button id="stop-button" class="quiet">■ 停止</button><button id="save-button" class="quiet">保存 <kbd>Ctrl S</kbd></button><button id="run-button" class="primary">▷ 运行宏</button></div>
+  </header>
+  <section class="contextbar"><button class="target quiet" id="target-button"><span id="target-dot" class="small-dot"></span><span id="target-name">Diablo IV.exe</span><span class="context-divider"></span><span id="trigger-label">F1 启动</span></button><div class="run-mode"><span>整个宏</span><select id="run-mode" aria-label="整个宏运行方式"><option value="once">执行一次</option><option value="continuous">持续循环</option></select><label id="cycle-gap-field" hidden>每轮间隔 <input id="cycle-gap" type="number" min="0" max="3600000" value="300" aria-label="整个宏每轮间隔"> ms</label><span id="cycle-stop-hint" hidden>再按启动键停止</span></div></section>
+  <section class="canvas-shell">
+   <div class="canvas-toolbar"><div class="document-status"><span class="small-dot"></span><span id="flow-stats"></span></div><div class="toolbar-actions"><button id="undo" class="icon" title="撤销 Ctrl Z" aria-label="撤销">↶</button><button id="redo" class="icon" title="重做 Ctrl Shift Z" aria-label="重做">↷</button><span class="context-divider"></span><button id="add-action">＋ 添加动作</button><button id="fit">适应画布</button></div></div>
+   <div id="canvas" tabindex="0" aria-label="宏画布，拖动空白平移，滚轮缩放">
+    <div class="canvas-caption"><span>从左到右执行</span><small>顺序自动连接 · 框内同时开始 · 重复范围一眼可见</small></div>
+    <div id="world"><div id="workflow"></div></div>
+    <div id="selection-toolbar" hidden role="toolbar" aria-label="选中动作操作"><span id="selection-count"></span><button id="make-parallel">⑂ 同时执行</button><button id="make-repeat">↻ 重复这一段</button><span class="context-divider"></span><button id="duplicate-selection" title="复制">⧉</button><button id="delete-selection" title="删除" aria-label="删除选中内容">⌫</button></div>
+    <div class="zoom-control"><button id="zoom-out" aria-label="缩小">−</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="放大">＋</button><span></span><button id="reset-view" title="原始比例">1:1</button></div>
+    <div class="canvas-help">Shift 点选多个动作 <span>·</span> 拖动空白平移 <span>·</span> 滚轮缩放</div>
+    <div id="selection-box" hidden></div>
+   </div>
+   <section id="preview-tray"><div class="preview-controls"><button id="preview-toggle" aria-label="播放或暂停预览">▷</button><span id="preview-position">0.00 s</span><span class="preview-divider">/</span><span id="preview-duration"></span><div class="progress-track"><i id="progress"></i></div><span id="playback-status">只预览，不发送按键</span><button id="expand-preview" class="quiet" aria-expanded="false">执行明细 ⌃</button></div><div id="preview-events" hidden></div></section>
+  </section>
+  <footer><span id="status-text">已就绪</span><span id="record-status"></span><span id="emergency-label">Pause 紧急停止</span></footer>
  </main>
 </div>
-<dialog id="settings-dialog"><div class="dialog-heading"><h2>窗口与设置</h2><button id="close-settings" aria-label="关闭设置">×</button></div><div id="settings-fields"></div><div class="dialog-actions"><button id="detect-button">读取游戏窗口</button><button id="settings-done" class="primary">完成并保存</button></div></dialog>
-<dialog id="add-dialog"><div class="dialog-heading"><h2>添加节点</h2><button id="close-add" aria-label="关闭添加节点">×</button></div><input id="node-search" placeholder="搜索：点击、等待、并行…" aria-label="搜索节点"><div id="node-search-results"></div></dialog>
-<script src="model.js"></script><script src="graph-model.js"></script><script src="app.js"></script>
-</body></html>
+<div id="toast" role="status" hidden></div>
+<dialog id="macro-dialog"><div class="dialog-heading"><h2>宏设置</h2><button data-close="macro-dialog" aria-label="关闭宏设置">×</button></div><label class="form-field">宏名称<input id="macro-name-input"></label><label class="form-field">启动快捷键<div class="form-row"><select id="macro-trigger"></select><button id="capture-trigger">录入</button></div></label><label class="form-field checkbox"><input id="macro-enabled" type="checkbox">启用此宏</label><p class="form-note">运行方式在顶部「整个宏」设置。动作参数直接在卡片上修改。</p><div class="dialog-actions"><button id="duplicate-macro">复制宏</button><button id="delete-macro" class="danger">删除宏</button><button id="apply-macro" class="primary">完成</button></div></dialog>
+<dialog id="settings-dialog"><div class="dialog-heading"><h2>窗口与设置</h2><button data-close="settings-dialog" aria-label="关闭窗口设置">×</button></div><div id="settings-fields"></div><p class="form-note">宏只在匹配的游戏窗口前台执行；切出窗口会停止并释放输入。</p><div class="dialog-actions"><button id="detect-button">读取游戏窗口</button><button id="settings-done" class="primary">保存设置</button></div></dialog>
+<dialog id="help-dialog"><div class="dialog-heading"><h2>用五种动作，表达整个宏</h2><button data-close="help-dialog" aria-label="关闭帮助">×</button></div><div class="help-item"><b>01</b><div><strong>宏和节点，各用一个抽屉</strong><p>左侧按钮独立切换，再点一次即可收起。右侧留给画布。</p></div></div><div class="help-item"><b>02</b><div><strong>选中动作，点「同时执行」</strong><p>动作进入不同分支；分支内顺序执行，分支之间同时开始。全部完成后自动继续。</p></div></div><div class="help-item"><b>03</b><div><strong>选中一段，点「重复这一段」</strong><p>紫色范围框标出重复内容，框头直接设置次数和两轮间隔。选中整个同时执行框，也能把全部分支一起重复。</p></div></div><div class="help-item"><b>04</b><div><strong>整个宏循环，在顶部设置</strong><p>「持续循环」给整个流程加范围框，结束后回到开始。框内「重复 4 次」只影响那一段。</p></div></div><p class="form-note">支持 Shift 点选和 Shift 拖动框选同一顺序内的连续动作、节点拖放重排、撤销、保存和逐步预览。</p><button data-close="help-dialog" class="primary">开始体验</button></dialog>
+<script src="model.js"></script><script src="graph-model.js"></script><script src="flow-model.js"></script><script src="app.js"></script>
+</body>
+</html>

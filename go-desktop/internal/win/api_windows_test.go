@@ -69,3 +69,22 @@ func TestNativeServiceStartsAndStopsWithoutInput(t *testing.T) {
 		t.Fatal("native service/overlay window not created")
 	}
 }
+
+func TestNativeServiceCanRestartAfterImmediateCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("native message loop lifecycle")
+	}
+	for i := 0; i < 6; i++ {
+		s := &Service{}
+		if err := s.Start(context.Background()); err != nil {
+			t.Fatalf("start %d: %v", i, err)
+		}
+		s.Close()
+		s.mu.Lock()
+		hwnd := s.hwnd
+		s.mu.Unlock()
+		if hwnd != 0 {
+			t.Fatalf("service %d retained its window", i)
+		}
+	}
+}

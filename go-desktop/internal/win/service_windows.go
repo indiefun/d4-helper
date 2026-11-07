@@ -82,7 +82,9 @@ func (s *Service) Close() {
 
 func (s *Service) run(ctx context.Context, ready chan<- error) {
 	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+	// Retire this native thread with the message loop. WM_QUIT can remain
+	// queued when cancellation races WM_CLOSE; reusing that thread would let a
+	// subsequent service exit immediately before processing its own messages.
 	defer close(s.done)
 	instance, _, _ := kernel.NewProc("GetModuleHandleW").Call(0)
 	name, _ := windows.UTF16PtrFromString("D4HelperGoNativeService")
@@ -124,6 +126,9 @@ func (s *Service) run(ctx context.Context, ready chan<- error) {
 		ready <- fmt.Errorf("创建原生服务窗口失败: %w", err)
 		return
 	}
+	// Cancellation may end the loop before WM_CLOSE is dispatched. Destroy the
+	// window on its owning thread before unregistering its window class.
+	defer proc("DestroyWindow").Call(hwnd)
 	s.mu.Lock()
 	s.hwnd = hwnd
 	s.mu.Unlock()

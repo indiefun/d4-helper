@@ -1,6 +1,8 @@
 # 第二版节点编辑器：抽屉、动作和作用范围
 
-状态：可交互设计稿，位于 `design/node-editor-v2.html`。直接打开即可体验，不需要服务或联网。设计稿只使用独立的 `d4-node-v2-design` 浏览器存储，不读写 `workspace.timeline.json`，不调用键鼠输入。本轮没有替换现有 EXE。
+实现状态：本设计已在 `3.0.0-alpha.3` 接入实际 Go 程序，使用与验证见 [README.md](README.md)。以下保留设计阶段记录。
+
+设计原型位于 `design/node-editor-v2.html`。直接打开即可体验，不需要服务或联网。设计稿只使用独立的 `d4-node-v2-design` 浏览器存储，不读写 `workspace.timeline.json`，不调用键鼠输入。本轮没有替换现有 EXE。
 
 ## 判断与依据
 

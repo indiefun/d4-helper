@@ -119,6 +119,12 @@ func normalize(raw string, editing bool) (string, Config, error) {
 	// but never trust a submitted track cache when executing a graph macro.
 	for i := range c.Macros {
 		if c.Macros[i].Graph != nil {
+			if c.Macros[i].Graph.Version == 2 {
+				// Repeated actions are compiled on demand. Persisting their expanded
+				// cache can turn a tiny structured macro into an unopenable file.
+				c.Macros[i].Tracks = nil
+				continue
+			}
 			tracks, _, err := graphTracks(c.Macros[i].Graph)
 			if err != nil {
 				return "", c, err
@@ -141,6 +147,9 @@ func normalize(raw string, editing bool) (string, Config, error) {
 		return "", c, err
 	}
 	b, err := json.Marshal(c)
+	if len(b) > 8*1024*1024 {
+		return "", c, fmt.Errorf("配置文件不能超过 8MB，请减少未使用的宏或录制轨迹")
+	}
 	return string(b), c, err
 }
 func (c Config) Runtime() (engine.Config, error) {

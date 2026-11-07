@@ -90,6 +90,47 @@ func TestNodeWorkspaceSaveReloadAndPreview(t *testing.T) {
 		t.Fatal("node layout lost on reload", err)
 	}
 }
+
+func TestStructuredWorkspaceSaveApplyPreviewAndReload(t *testing.T) {
+	raw, err := json.Marshal(timeline.FlowDefault())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "workspace.timeline.json")
+	if _, err := writeConfiguration(path, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	a := NewApp(path)
+	a.dry = true
+	a.startup(context.Background())
+	defer a.shutdown(context.Background())
+	if a.startupError != "" {
+		t.Fatal(a.startupError)
+	}
+	if err := a.StopAll(); err != nil {
+		t.Fatal(err)
+	}
+	w, err := a.SaveAndApply(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.PreviewMacro(w.Content, "starter")
+	if err != nil || p.DurationMS != 980 || p.Count != 12 {
+		t.Fatal(p, err)
+	}
+	loaded, err := a.LoadConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, cfg, err := timeline.Normalize(loaded.Content)
+	if err != nil || cfg.Macros[0].Graph.Version != 2 || cfg.Macros[0].Graph.Root.Items[0].Branches[1].Items[0].Count != 4 {
+		t.Fatal(cfg, err)
+	}
+	s, err := a.worker.Snapshot()
+	if err != nil || !s.Armed {
+		t.Fatal("saved flow not armed", s, err)
+	}
+}
 func TestLegacyFileIsExplicitlyRejectedWithoutModification(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	raw := `{"macros":[],"toggle_profiles":[]}`

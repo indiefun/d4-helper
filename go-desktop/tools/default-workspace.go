@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	b, err := json.MarshalIndent(timeline.NodeDefault(), "", "  ")
+	b, err := json.MarshalIndent(timeline.FlowDefault(), "", "  ")
 	if err != nil {
 		panic(err)
 	}

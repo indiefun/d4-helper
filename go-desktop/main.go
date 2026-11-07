@@ -48,7 +48,7 @@ func main() {
 		}
 		if *config == "" {
 			*config = filepath.Join(filepath.Dir(executable), "workspace.timeline.json")
-			data, _ := json.MarshalIndent(timeline.NodeDefault(), "", "  ")
+			data, _ := json.MarshalIndent(timeline.FlowDefault(), "", "  ")
 			if _, err := writeConfiguration(*config, string(data)); err != nil {
 				win.ShowError(err.Error())
 				return
