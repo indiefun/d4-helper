@@ -1,163 +1,50 @@
-// Test our local editor in an isolated headless browser. No user browser profile
-// or real input injection is involved. The test owns its temporary HTTP server.
+﻿// Uses an isolated headless Edge instance and temporary server; no input injection.
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const http=require('node:http');
 const fs=require('node:fs');
 (async()=>{
- const frontend=path.resolve(__dirname,'../frontend');
- const server=http.createServer((request,response)=>{const pathname=new URL(request.url,'http://localhost').pathname;const file=path.resolve(frontend,'.'+(pathname==='/'?'/index.html':pathname));if(!file.startsWith(frontend+path.sep)){response.writeHead(403).end();return;}fs.readFile(file,(error,data)=>{if(error){response.writeHead(404).end();return;}const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.jpg':'image/jpeg'};response.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream'});response.end(data);});});
- await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- const browser=await chromium.launch({headless:true,channel:'msedge'});
+ const frontend=path.resolve(__dirname,'../frontend'),build=path.resolve(__dirname,'../build');fs.mkdirSync(build,{recursive:true});
+ const server=http.createServer((request,response)=>{const pathname=new URL(request.url,'http://localhost').pathname;const file=path.resolve(frontend,'.'+(pathname==='/'?'/index.html':pathname));if(!file.startsWith(frontend+path.sep)){response.writeHead(403).end();return;}fs.readFile(file,(error,data)=>{if(error){response.writeHead(404).end();return;}const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};response.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream'});response.end(data);});});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const browser=await chromium.launch({headless:true,channel:'msedge'});
  try{
-  const page=await browser.newPage({viewport:{width:1440,height:900},deviceScaleFactor:1});
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.locator('.clip').first().waitFor();
-  assert.equal(await page.locator('.track-lane').count(),2);
-  assert.deepEqual(await page.locator('[data-action]').evaluateAll(elements=>elements.map(e=>e.dataset.action)),['tap','hold','move','scroll']);
-  assert.equal(await page.locator('#inspector-title').textContent(),'宏属性');
-  await page.screenshot({path:path.join(__dirname,'../build/studio-overview.png')});
-  await page.getByRole('switch',{name:'启用此宏'}).click();
-  assert.equal(await page.locator('#macro-enabled').getAttribute('aria-checked'),'false');
-  await page.getByRole('switch',{name:'启用此宏'}).press('Space');
-  assert.equal(await page.locator('#macro-enabled').getAttribute('aria-checked'),'true');
-  await page.locator('.clip.tap').first().click();
-  assert.equal(await page.locator('#inspector-title').textContent(),'动作属性');
-  assert.equal(await page.locator('#macro-trigger,#macro-enabled,#loop,#loop-wait,#duration,#block-repeat').count(),0);
-  await page.locator('[data-macro]').first().click();
-  assert.equal(await page.locator('#inspector-title').textContent(),'宏属性');
-  assert.equal(await page.locator('#block-key').count(),0);
-  // Overlapping palette drops show red and never add or shift events.
-  const skillLane=page.locator('.track-lane').first(),skillBounds=await skillLane.boundingBox();
-  const holdPalette=await page.locator('[data-action="hold"]').boundingBox();
-  await page.mouse.move(holdPalette.x+20,holdPalette.y+15);await page.mouse.down();
-  await page.mouse.move(skillBounds.x+44,skillBounds.y+30,{steps:10});
-  await page.mouse.move(skillBounds.x+45,skillBounds.y+30);
-  await page.locator('.placement-preview.invalid').waitFor();
-  await page.mouse.up();
-  assert.equal(await page.locator('.clip').count(),3,'conflicting drop added a block');
-  // Existing blocks also return to their exact position after a conflicting drag.
-  const firstTap=await page.locator('.clip.tap').first().boundingBox();
-  await page.mouse.move(firstTap.x+4,firstTap.y+15);await page.mouse.down();
-  await page.mouse.move(firstTap.x+136,firstTap.y+15,{steps:10});
-  await page.locator('.placement-preview.invalid').waitFor();await page.mouse.up();
-  await page.locator('.clip.tap').first().click();
-  assert.equal(await page.locator('#block-at').inputValue(),'200','conflicting move changed start time');
-  // Stretch stops at 800ms, exactly where the second click starts.
-  const firstGrip=await page.locator('.clip.selected .resize-handle').boundingBox();
-  await page.mouse.move(firstGrip.x+2,firstGrip.y+15);await page.mouse.down();
-  await page.mouse.move(firstGrip.x+250,firstGrip.y+15,{steps:10});await page.mouse.up();
-  assert.equal(await page.locator('#block-duration').inputValue(),'600');
-  await page.locator('#undo').click();
-  await page.locator('[data-macro]').first().click();
-  assert.equal(await page.locator('#duration').count(),0);await page.locator('#loop').check();
-  await page.locator('#loop-wait').fill('1100');await page.locator('#loop-wait').press('Tab');
-  assert.equal(await page.locator('#loop-status').textContent(),'循环播放');
-  assert.equal(await page.locator('#duration-readout').textContent(),'1400');assert.equal(await page.locator('#cycle-duration').textContent(),'2500');
-  assert.equal(await page.locator('#loop-wait-region').isVisible(),true);
-  const waitBox=await page.locator('#loop-wait-region').boundingBox();assert.ok(Math.abs(waitBox.width-242)<1);
-  await page.screenshot({path:path.join(__dirname,'../build/studio-loop-wait.png')});
-  await page.locator('#add-track').click();
-  const palette=page.locator('[data-action="tap"]'),lane=page.locator('.track-lane').nth(2);
-  await palette.dragTo(lane,{targetPosition:{x:220,y:45}});
-  assert.equal(await page.locator('.clip').count(),4);
-  await page.locator('.clip.selected').click();
-  assert.equal(await page.locator('#macro-trigger,#macro-enabled,#loop,#loop-wait,#duration,#block-repeat,.repeat-ghost').count(),0);
-  await page.locator('#block-key').selectOption('3');
-  await page.locator('#block-duration').fill('100');await page.locator('#block-duration').press('Tab');
-  const clip=page.locator('.clip.selected');const before=await clip.boundingBox();
-  const grip=Math.min(12,before.width/3);
-  const destination=await page.locator('.track-lane').first().boundingBox();
-  await page.mouse.move(before.x+grip,before.y+15);await page.mouse.down();await page.mouse.move(before.x+grip+100,destination.y+destination.height-20,{steps:10});await page.mouse.up();
-  const after=await page.locator('.clip.selected').boundingBox();assert.ok(after.x>before.x+50,'drag did not move block in time');
-  const resize=page.locator('.clip.selected .resize-handle');const handle=await resize.boundingBox();
-  await page.mouse.move(handle.x+3,handle.y+12);await page.mouse.down();await page.mouse.move(handle.x+70,handle.y+12,{steps:8});await page.mouse.up();
-  assert.ok(Number(await page.locator('#block-duration').inputValue())>100,'resize did not extend block');
-  await page.screenshot({path:path.join(__dirname,'../build/studio-editing.png')});
-  await page.locator('#save-button').click();
-  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('d4-studio-draft')));
-  assert.equal(saved.schema_version,3);assert.equal(saved.macros[0].tracks[0].blocks.length,3,'cross-track drag did not change target track');assert.equal(saved.macros[0].tracks[2].blocks.length,0);
-  assert.equal(saved.macros[0].loop,true);assert.equal(saved.macros[0].loop_wait_ms,1100);
-  const actionEnd=Math.max(...saved.macros[0].tracks.flatMap(t=>t.blocks.map(b=>b.at_ms+b.duration_ms)));assert.equal(saved.macros[0].duration_ms,actionEnd+1100);
-  assert.equal(await page.locator('#inspector-title').textContent(),'动作属性');
-  await page.locator('[data-macro]').first().click();
-  assert.equal(await page.locator('#loop').isChecked(),true);
-  await page.locator('#loop').uncheck();assert.equal(await page.locator('#loop-wait').count(),0);assert.equal(await page.locator('#loop-wait-region').isVisible(),false);
-  await page.locator('#loop').check();assert.equal(await page.locator('#loop-wait').inputValue(),'1100');
-  await page.locator('#settings-button').click();
-  await page.locator('#settings-dialog').waitFor({state:'visible'});
-  await page.locator('[data-setting="process_name"]').fill('Game.exe');
-  await page.locator('[data-setting="process_name"]').press('Tab');
-  await page.locator('#settings-done').click();
-  await page.locator('#save-button').click();
-  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('d4-studio-draft')).process_name),'Game.exe');
-  assert.deepEqual(errors,[]);
-  await page.setViewportSize({width:1200,height:800});await page.screenshot({path:path.join(__dirname,'../build/studio-1200.png')});
-  await page.locator('#new-macro').click();
-  assert.equal(await page.locator('.track-lane').count(),1);
-  assert.equal(await page.locator('.clip').count(),0);
-  const emptyLane=await page.locator('.track-lane').boundingBox();
-  await page.mouse.click(emptyLane.x+110,emptyLane.y+40);
-  await page.locator('[data-action="hold"]').click();
-  assert.equal(await page.locator('#block-at').inputValue(),'500');
-  assert.equal(await page.locator('#duration-readout').textContent(),'1100');
-  await page.locator('#save-button').click();
-  await page.reload();
-  await page.locator('[data-macro]').last().click();
-  assert.equal(await page.locator('.track-lane').count(),1);
-  assert.equal(await page.locator('.clip.hold').count(),1);
-  await page.locator('[data-track-toggle]').click();
-  assert.equal(await page.locator('[data-track-toggle]').getAttribute('aria-checked'),'false');
-  assert.equal(await page.locator('.event-chip').count(),0);
-  await page.locator('[data-track-toggle]').click();
-  assert.equal(await page.locator('[data-track-toggle]').getAttribute('aria-checked'),'true');
-  await page.locator('[data-track-toggle]').focus();await page.keyboard.press('Space');
-  assert.equal(await page.locator('[data-track-toggle]').getAttribute('aria-checked'),'false','Space triggered preview instead of the focused switch');
-  assert.equal(await page.locator('#preview-button').textContent(),'▶');
-  await page.keyboard.press('Space');
-  assert.equal(await page.locator('[data-track-toggle]').getAttribute('aria-checked'),'true');
-  await page.locator('#add-track').click();
-  const originalTrack=await page.locator('[data-track-row]').first().getAttribute('data-track-row');
-  await page.locator('[data-track-down]').first().click();
-  assert.equal(await page.locator('[data-track-row]').last().getAttribute('data-track-row'),originalTrack);
-  await page.locator('[data-track-up]').last().click();
-  assert.equal(await page.locator('[data-track-row]').first().getAttribute('data-track-row'),originalTrack);
-  page.once('dialog',async dialog=>{assert.match(dialog.message(),/1 个动作/);await dialog.dismiss();});
-  await page.locator('[data-track-remove]').first().click();
-  assert.equal(await page.locator('.clip.hold').count(),1);
-  page.once('dialog',dialog=>dialog.accept());await page.locator('[data-track-remove]').first().click();
-  assert.equal(await page.locator('.clip.hold').count(),0);
-  await page.locator('#undo').click();assert.equal(await page.locator('.clip.hold').count(),1);
-  const scroll=page.locator('#timeline-scroll');
-  const scrollBounds=await scroll.boundingBox(),anchor={x:scrollBounds.x+scrollBounds.width-40,y:scrollBounds.y+60};
-  await page.mouse.move(anchor.x,anchor.y);
-  const zoomBefore=await page.locator('#zoom-label').textContent();
-  await page.keyboard.down('Control');await page.mouse.wheel(0,-100);await page.keyboard.up('Control');
-  await page.waitForFunction(before=>document.getElementById('zoom-label').textContent!==before,zoomBefore);
-  assert.equal(await page.locator('#zoom-label').textContent(),'130%');
-  await page.keyboard.down('Shift');await page.mouse.wheel(0,150);await page.keyboard.up('Shift');
-  await page.waitForFunction(()=>document.getElementById('timeline-scroll').scrollLeft>0);
-  await page.keyboard.down('Control');await page.mouse.wheel(0,100);await page.keyboard.up('Control');
-  await page.waitForFunction(()=>document.getElementById('zoom-label').textContent==='100%');
-  assert.equal(await page.evaluate(()=>window.devicePixelRatio),1,'Ctrl wheel changed browser page zoom');
-  const controls=await page.locator('.track-controls').first().boundingBox(),header=await page.locator('.track-header').nth(1).boundingBox();
-  assert.ok(controls.x+controls.width<=header.x+header.width,'track controls overflow header');
-  await page.locator('[data-track-toggle]').last().click();
-  await scroll.evaluate(element=>element.scrollLeft=0);
-  await page.screenshot({path:path.join(__dirname,'../build/studio-track-controls.png')});
-  // An older overlapping draft opens with an explicit repair action, never
-  // silently moving timing or losing blocks. Saving and reopening is stable.
-  await page.evaluate(()=>{const doc=TimelineModel.demo(),m=doc.macros[0];m.tracks[0].blocks.push(...m.tracks[1].blocks);m.tracks.splice(1);localStorage.setItem('d4-studio-draft',JSON.stringify(doc));});
-  await page.reload();await page.locator('#overlap-notice').waitFor({state:'visible'});
-  await page.locator('#split-tracks').click();
-  assert.equal(await page.locator('.track-lane').count(),2);
-  await page.locator('#save-button').click();
-  const repaired=await page.evaluate(()=>JSON.parse(localStorage.getItem('d4-studio-draft')));
-  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('d4-studio-draft')).macros[0].tracks.some(TimelineModel.trackOverlaps)),false);
-  assert.deepEqual(repaired.macros[0].tracks.flatMap(t=>t.blocks.map(b=>b.at_ms)).sort((a,b)=>a-b),[200,200,800]);
-  await page.reload();assert.equal(await page.locator('#overlap-notice').isVisible(),false);
-  assert.deepEqual(errors,[]);
-  console.log('Headless browser: overlap rejection/red preview, clamped resizing, explicit split, drag, save, track controls and scrolling passed. Screenshots in build/.');
+  const page=await browser.newPage({viewport:{width:1600,height:1000},deviceScaleFactor:1}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.locator('.flow-node').first().waitFor();assert.equal(await page.locator('.flow-node').count(),4);
+  await page.screenshot({path:path.join(build,'node-editor-overview.png')});
+  // Inline editing updates downstream timing, and undo remains usable after save.
+  await page.locator('[data-key="wait_ms"]').fill('700');await page.locator('[data-key="wait_ms"]').press('Tab');
+  await page.locator('#save-button').click();let saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('d4-flow-draft')));assert.equal(saved.macros[0].duration_ms,1560);
+  await page.locator('#undo').click();assert.equal(await page.locator('[data-key="wait_ms"]').inputValue(),'300');
+  await page.locator('#redo').click();assert.equal(await page.locator('[data-key="wait_ms"]').inputValue(),'700');
+  // Drag a node: moving its card changes only layout, never execution time.
+  const hold=page.locator('.flow-node').filter({has:page.locator('strong',{hasText:'按住按键'})});const oldBox=await hold.boundingBox();
+  await page.mouse.move(oldBox.x+50,oldBox.y+12);await page.mouse.down();await page.mouse.move(oldBox.x+90,oldBox.y+72,{steps:8});await page.mouse.up();
+  await page.locator('#save-button').click();saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('d4-flow-draft')));assert.equal(saved.macros[0].duration_ms,1560);assert.notEqual(saved.macros[0].graph.nodes.find(n=>n.type==='hold').y,180);
+  // Zoom around cursor, then fit and pan the graph from empty canvas.
+  const zoom=await page.locator('#zoom-label').textContent(),vp=await page.locator('#graph-viewport').boundingBox();await page.mouse.move(vp.x+vp.width/2,vp.y+vp.height/2);await page.mouse.wheel(0,-150);assert.notEqual(await page.locator('#zoom-label').textContent(),zoom);await page.locator('#fit').click();
+  const transform=await page.locator('#graph-world').getAttribute('style');await page.mouse.move(vp.x+30,vp.y+vp.height-70);await page.mouse.down();await page.mouse.move(vp.x+70,vp.y+vp.height-45,{steps:5});await page.mouse.up();assert.notEqual(await page.locator('#graph-world').getAttribute('style'),transform);
+  // Begin a fresh graph, add fork and two branches, then wire both into join.
+  await page.locator('#new-macro').click();await page.locator('[data-node-type="parallel"]').click();await page.locator('[data-node-type="hold"]').click();
+  await page.locator('.flow-node.mint').filter({has:page.locator('strong',{hasText:'并行',exact:true})}).locator('.node-header').click();
+  await page.locator('[data-node-type="wait"]').click();await page.locator('[data-key="wait_ms"]').fill('900');await page.locator('[data-key="wait_ms"]').press('Tab');await page.locator('[data-node-type="tap"]').click();
+  // Add an unconnected join via actual HTML drag and drop.
+  await page.locator('#fit').click();const viewport=await page.locator('#graph-viewport').boundingBox();await page.locator('[data-node-type="join"]').dragTo(page.locator('#graph-viewport'),{targetPosition:{x:viewport.width-90,y:viewport.height-110}});assert.equal(await page.locator('.flow-node').count(),6);await page.locator('#fit').click();
+  async function connect(fromType,toType){const source=page.locator('.flow-node').filter({has:page.locator('.node-header strong',{hasText:fromType,exact:true})}).locator('.port.out');const target=page.locator('.flow-node').filter({has:page.locator('.node-header strong',{hasText:toType,exact:true})}).locator('.port.in');const a=await source.boundingBox(),b=await target.boundingBox();await page.mouse.move(a.x+a.width/2,a.y+a.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width/2,b.y+b.height/2,{steps:12});await page.mouse.up();}
+  await connect('按住按键','汇合');await connect('点击按键','汇合');
+  await page.locator('.flow-node').filter({has:page.locator('.node-header strong',{hasText:'汇合',exact:true})}).locator('.node-header').click();await page.locator('[data-node-type="wait"]').click();await page.locator('#fit').click();
+  await page.locator('#save-button').click();saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('d4-flow-draft')));const flow=saved.macros.at(-1);assert.equal(flow.duration_ms,1460);assert.equal(flow.graph.edges.length,7);assert.equal(flow.graph.nodes.length,7);
+  await page.screenshot({path:path.join(build,'node-editor-parallel.png')});fs.writeFileSync(path.join(build,'browser-node-workspace.json'),JSON.stringify(saved,null,2));
+  // Invalid multi-input connection must leave the last valid graph intact.
+  await connect('点击按键','按住按键');assert.equal(await page.locator('[data-edge]').count(),7);assert.match(await page.locator('#notice').textContent(),/并行节点|汇合节点/);
+  assert.equal(await page.locator('.flow-node .port.in').count(),6);
+  // Delete an edge with keyboard, undo, and reopen persisted graph.
+  await page.locator('[data-edge]').last().locator('.edge-hit').click({force:true});await page.keyboard.press('Delete');assert.equal(await page.locator('[data-edge]').count(),6);await page.locator('#undo').click();assert.equal(await page.locator('[data-edge]').count(),7);
+  await page.locator('#save-button').click();await page.reload();await page.locator('.flow-node').first().waitFor();await page.locator('[data-macro]').last().click();assert.equal(await page.locator('.flow-node').count(),7);assert.equal(await page.locator('[data-edge]').count(),7);
+  await page.locator('#preview-button').click();await page.locator('.playing').first().waitFor();await page.locator('#stop-button').click();assert.equal(await page.locator('.playing').count(),0);
+  await page.setViewportSize({width:1200,height:780});await page.screenshot({path:path.join(build,'node-editor-1200.png')});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  // Legacy timeline import is in-memory only and preserves event timing.
+  await page.evaluate(()=>{localStorage.removeItem('d4-flow-draft');localStorage.setItem('d4-studio-draft',JSON.stringify(TimelineModel.demo()));});await page.reload();await page.locator('.flow-node').first().waitFor();assert.ok(await page.locator('.flow-node').count()>4);await page.locator('#save-button').click();const migrated=await page.evaluate(()=>JSON.parse(localStorage.getItem('d4-flow-draft')));assert.equal(migrated.macros[0].duration_ms,1400);assert.deepEqual(migrated.macros[0].tracks.flatMap(t=>t.blocks.map(b=>b.at_ms)).sort((a,b)=>a-b),[200,200,800]);
+  assert.deepEqual(errors,[]);console.log('Node editor browser: inline timing, node drag, zoom/pan, palette drop, parallel/join wiring, undo, persistence, preview, responsive layout and legacy migration passed.');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

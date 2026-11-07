@@ -48,7 +48,7 @@ func main() {
 		}
 		if *config == "" {
 			*config = filepath.Join(filepath.Dir(executable), "workspace.timeline.json")
-			data, _ := json.MarshalIndent(timeline.Default(), "", "  ")
+			data, _ := json.MarshalIndent(timeline.NodeDefault(), "", "  ")
 			if _, err := writeConfiguration(*config, string(data)); err != nil {
 				win.ShowError(err.Error())
 				return
@@ -64,7 +64,7 @@ func main() {
 	app.dry = *dry || *selfTest != ""
 	app.selfTest = *selfTest
 	err = wails.Run(&options.App{
-		Title: "D4Helper Studio · 多轨宏编辑器", Width: 1440, Height: 900, MinWidth: 1200, MinHeight: 760,
+		Title: "D4Helper Studio · 节点工作台", Width: 1440, Height: 900, MinWidth: 1200, MinHeight: 760,
 		BackgroundColour: &options.RGBA{R: 18, G: 20, B: 24, A: 255},
 		AssetServer:      &assetserver.Options{Assets: frontend},
 		Windows:          &winoptions.Options{Theme: winoptions.Dark, OnSuspend: func() { _ = app.StopAll() }, OnResume: func() { _ = app.StopAll() }},

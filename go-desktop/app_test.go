@@ -51,6 +51,45 @@ func TestTimelineSaveReloadAndRuntime(t *testing.T) {
 		t.Fatal("timeline preview mismatch", err)
 	}
 }
+
+func TestNodeWorkspaceSaveReloadAndPreview(t *testing.T) {
+	cfg := timeline.NodeDefault()
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "workspace.timeline.json")
+	if _, err := writeConfiguration(path, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	a := NewApp(path)
+	a.dry = true
+	a.startup(context.Background())
+	defer a.shutdown(context.Background())
+	if a.startupError != "" {
+		t.Fatal(a.startupError)
+	}
+	w, err := a.SaveAndApply(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, saved, err := timeline.Normalize(w.Content)
+	if err != nil || saved.Macros[0].Graph == nil || len(saved.Macros[0].Graph.Edges) != 3 {
+		t.Fatal("node authoring lost during save", err)
+	}
+	p, err := a.PreviewMacro(w.Content, "starter")
+	if err != nil || p.Count != 4 || p.DurationMS != 1160 {
+		t.Fatal("node plan did not reach execution bridge", p, err)
+	}
+	loaded, err := a.LoadConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, reloaded, err := timeline.Normalize(loaded.Content)
+	if err != nil || reloaded.Macros[0].Graph.Nodes[3].X != 920 {
+		t.Fatal("node layout lost on reload", err)
+	}
+}
 func TestLegacyFileIsExplicitlyRejectedWithoutModification(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	raw := `{"macros":[],"toggle_profiles":[]}`

@@ -4,8 +4,17 @@
 package main
 
 import (
- "encoding/json"
- "os"
- "github.com/indiefun/d4-helper/go-desktop/internal/timeline"
+	"encoding/json"
+	"github.com/indiefun/d4-helper/go-desktop/internal/timeline"
+	"os"
 )
-func main(){b,err:=json.MarshalIndent(timeline.Default(),"","  ");if err!=nil{panic(err)};if err:=os.WriteFile(os.Args[1],append(b,'\n'),0644);err!=nil{panic(err)}}
+
+func main() {
+	b, err := json.MarshalIndent(timeline.NodeDefault(), "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(os.Args[1], append(b, '\n'), 0644); err != nil {
+		panic(err)
+	}
+}

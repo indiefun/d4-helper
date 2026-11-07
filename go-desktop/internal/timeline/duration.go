@@ -10,7 +10,17 @@ const MaxDurationMS int64 = 3600000
 // timing includes muted tracks so switching a track off preserves the timing
 // of the remaining tracks. DurationMS is only a derived compatibility field.
 func (m Definition) timing() (actionMS, playbackMS int64, err error) {
-	for _, track := range m.Tracks {
+	if m.Graph != nil {
+		_, actionMS, err = graphTracks(m.Graph)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	tracks := m.Tracks
+	if m.Graph != nil {
+		tracks = nil
+	}
+	for _, track := range tracks {
 		for _, b := range track.Blocks {
 			if b.AtMS < 0 || b.DurationMS < 0 || b.AtMS > MaxDurationMS || b.DurationMS > MaxDurationMS-b.AtMS {
 				return 0, 0, fmt.Errorf("动作时间必须在 0ms–1 小时内")

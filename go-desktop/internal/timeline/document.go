@@ -49,6 +49,7 @@ type Definition struct {
 	Loop       bool    `json:"loop"`
 	LoopWaitMS int64   `json:"loop_wait_ms"`
 	Tracks     []Track `json:"tracks"`
+	Graph      *Graph  `json:"graph,omitempty"`
 }
 type Config struct {
 	Version          int          `json:"schema_version"`
@@ -113,6 +114,17 @@ func normalize(raw string, editing bool) (string, Config, error) {
 	}
 	if c.Macros == nil {
 		return "", c, fmt.Errorf("作品列表必须是数组")
+	}
+	// The graph is the source of truth. Persist derived tracks for inspection,
+	// but never trust a submitted track cache when executing a graph macro.
+	for i := range c.Macros {
+		if c.Macros[i].Graph != nil {
+			tracks, _, err := graphTracks(c.Macros[i].Graph)
+			if err != nil {
+				return "", c, err
+			}
+			c.Macros[i].Tracks = tracks
+		}
 	}
 	check := c
 	if editing {

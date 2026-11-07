@@ -12,6 +12,13 @@ import (
 // use reference counts, so an earlier block cannot release a later block's key.
 // Every key block generates its own press and release events.
 func Compile(m Definition) (sequence.Plan, error) {
+	if m.Graph != nil {
+		tracks, _, err := graphTracks(m.Graph)
+		if err != nil {
+			return sequence.Plan{}, err
+		}
+		m.Tracks = tracks
+	}
 	_, duration, err := m.timing()
 	p := sequence.Plan{Duration: time.Duration(duration) * time.Millisecond, Loop: m.Loop}
 	if err != nil {

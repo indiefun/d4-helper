@@ -1,32 +1,37 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>D4Helper Studio</title><link rel="stylesheet" href="style.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>D4Helper · 节点工作台</title><link rel="stylesheet" href="style.css"></head>
 <body>
 <div class="studio">
- <aside class="library">
-  <div class="brand"><span class="brand-mark">D4</span><div><strong>D4Helper</strong><small>STUDIO</small></div></div>
-  <div class="library-heading"><span id="library-label"></span><button id="new-macro" class="icon-button" aria-label="New macro">+</button></div>
-  <nav id="macro-list"></nav>
-  <div class="library-footer"><button id="settings-button"></button><button id="hide-button"></button><button id="quit-button"></button></div>
+ <aside class="sidebar">
+  <div class="brand"><span class="brand-mark">D4</span><div><strong>D4Helper</strong><small>FLOW STUDIO</small></div><span class="alpha">试用</span></div>
+  <div class="section-label">我的流程 <button id="new-macro" aria-label="新建流程" title="新建流程">＋</button></div><nav id="macro-list"></nav>
+  <div class="section-label node-heading">添加节点 <kbd>双击画布</kbd></div><p class="sidebar-hint">点击接在选中节点后，也可拖入画布。</p>
+  <div id="node-library"></div>
+  <div class="sidebar-bottom"><button id="settings-button">⚙ 窗口与设置</button><div><button id="hide-button">隐藏到托盘</button><button id="quit-button">退出</button></div></div>
  </aside>
  <main>
-  <header class="topbar"><div class="title-wrap"><span class="eyebrow">MACRO WORKSPACE</span><h1 id="macro-name"></h1></div><div class="file-actions"><span id="save-state"></span><button id="open-button"></button><button id="save-button" class="primary"></button></div></header>
-  <div class="runbar"><div class="target"><span id="target-dot" class="dot"></span><span id="target-label"></span><button id="target-button"></button></div><div class="run-actions"><button id="record-button" class="record-button"></button><button id="stop-button" class="stop-button"></button><button id="play-button" class="primary"></button></div></div>
+  <header><div class="title-wrap"><div class="eyebrow">NODE WORKSPACE <span>/</span> 节点工作台</div><h1 id="macro-name"></h1></div><div class="header-actions"><span id="save-state">未保存</span><button id="open-button">打开</button><button id="save-button" class="primary">保存流程 <kbd>Ctrl S</kbd></button></div></header>
+  <div class="runbar"><button id="target-button" class="target"><span id="target-dot"></span><span id="target-label">选择游戏窗口</span><span class="target-edit">↗</span></button><div class="run-actions"><button id="record-button">● 录制</button><button id="stop-button">■ 停止</button><button id="play-button" class="primary">▷ 运行流程</button></div></div>
   <div id="notice" class="notice" role="status" hidden></div>
-  <div id="overlap-notice" class="overlap-notice" role="status" hidden><span>这个作品有同轨重叠动作，需要拆分后才能运行。动作时间会保持不变。</span><button id="split-tracks">拆分到多条轨道</button></div>
   <div class="workarea">
-   <aside class="palette"><div class="pane-title" id="palette-title"></div><p class="pane-hint" id="palette-hint"></p><div id="action-library"></div><div class="palette-note" id="palette-note"></div></aside>
-   <section class="editor">
-    <div class="timeline-toolbar"><div class="tool-group"><button id="preview-button" class="preview-control">&#9654;</button><span id="time-readout">0.00s</span><span class="toolbar-divider"></span><span id="loop-status" class="playback-summary"></span></div><div class="tool-group"><button id="undo" class="icon-button" aria-label="Undo">&#8617;</button><button id="redo" class="icon-button" aria-label="Redo">&#8618;</button><label class="snap-label"><input id="snap" type="checkbox" checked><span id="snap-label"></span></label><button id="zoom-out" class="icon-button">&#8722;</button><span id="zoom-label">100%</span><button id="zoom-in" class="icon-button">+</button><button id="fit" class="small-button"></button></div></div>
-    <div class="timeline-scroll" id="timeline-scroll" title="拖动动作块移动，拉右边缘改时长；Shift＋滚轮横移，Ctrl＋滚轮缩放"><div id="timeline-canvas"><div class="ruler-row"><div class="track-header ruler-label" id="track-label"></div><div id="ruler" class="ruler"></div></div><div id="tracks"></div><div id="loop-wait-region" class="loop-wait-region" hidden><span id="loop-wait-label"></span></div><div id="timeline-end" class="timeline-end"><span></span></div><div id="playhead" class="playhead"><span></span></div></div></div>
-    <div class="timeline-bottom"><button id="add-track"></button><span id="timeline-help"></span><span class="duration-summary"><span id="length-label"></span> <span id="duration-readout"></span> ms<span id="cycle-summary" hidden> · 每轮 <span id="cycle-duration"></span> ms</span></span></div>
-    <section class="preview-panel"><div class="preview-heading"><div><span class="eyebrow">PREVIEW</span><h2 id="preview-title"></h2></div><span id="event-count"></span></div><div id="preview-events"></div><div id="validation" role="status"></div></section>
+   <section class="editor" aria-label="节点编辑器">
+    <div class="canvas-toolbar"><div class="toolbar-group"><span class="flow-indicator"></span><span id="flow-summary"></span></div><div class="toolbar-group"><button id="undo" aria-label="撤销" title="撤销 Ctrl Z">↶</button><button id="redo" aria-label="重做" title="重做 Ctrl Shift Z">↷</button><span class="separator"></span><button id="layout" title="自动整理节点">自动整理</button><button id="fit" title="显示全部节点">适应画布</button></div></div>
+    <div id="graph-viewport" tabindex="0" aria-label="流程画布，滚轮缩放，拖动空白平移">
+     <div id="graph-world"><svg id="graph-edges" aria-label="节点连线"></svg><div id="graph-nodes"></div></div>
+     <div class="canvas-guide"><span class="guide-icon">⑂</span><strong>把操作连起来，就是一个流程。</strong><span>从右侧圆点拖到下一节点的左侧圆点</span></div>
+     <div class="canvas-corner"><button id="zoom-out" aria-label="缩小">−</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="放大">＋</button></div>
+     <div id="minimap" aria-label="流程缩略图" title="点击适应全部节点"></div>
+    </div>
+    <div class="canvas-footer"><span id="canvas-hint">拖动空白平移 · 滚轮缩放 · Delete 删除 · 双击添加</span><span id="node-count"></span></div>
+    <div class="preview-panel"><div class="preview-header"><button id="preview-button" aria-label="预览流程">▷</button><div><strong>流程预览</strong><small>只看顺序，不发送按键</small></div><span id="preview-time">0.00 s</span><span id="duration-summary"></span></div><div id="preview-strip"></div><div id="validation" role="status"></div></div>
    </section>
-   <aside class="inspector"><div class="inspector-heading"><div class="pane-title" id="inspector-title"></div><div id="inspector-controls"></div></div><div id="inspector"></div></aside>
+   <aside class="inspector"><div class="inspector-heading"><span class="eyebrow">DETAILS</span><h2 id="inspector-title">流程设置</h2></div><div id="inspector"></div><div class="inspector-tip"><span>小提示</span><p id="inspector-tip">连线决定执行顺序，节点摆放位置不会影响时间。</p></div></aside>
   </div>
-  <footer class="statusbar"><span id="status-text"></span><span id="record-status"></span><span id="shortcut-tip"></span></footer>
+  <footer><span id="status-text">准备就绪</span><span id="record-status"></span><span id="shortcut-tip">Pause 紧急停止</span></footer>
  </main>
 </div>
-<dialog id="settings-dialog"><div class="dialog-heading"><h2 id="settings-title"></h2><button id="close-settings" class="icon-button">&#215;</button></div><div id="settings-fields"></div><div class="dialog-actions"><button id="detect-button"></button><button id="settings-done" class="primary"></button></div><p id="settings-note"></p></dialog>
-<script src="model.js"></script><script src="app.js"></script>
+<dialog id="settings-dialog"><div class="dialog-heading"><h2>窗口与设置</h2><button id="close-settings" aria-label="关闭设置">×</button></div><div id="settings-fields"></div><div class="dialog-actions"><button id="detect-button">读取游戏窗口</button><button id="settings-done" class="primary">完成并保存</button></div></dialog>
+<dialog id="add-dialog"><div class="dialog-heading"><h2>添加节点</h2><button id="close-add" aria-label="关闭添加节点">×</button></div><input id="node-search" placeholder="搜索：点击、等待、并行…" aria-label="搜索节点"><div id="node-search-results"></div></dialog>
+<script src="model.js"></script><script src="graph-model.js"></script><script src="app.js"></script>
 </body></html>
