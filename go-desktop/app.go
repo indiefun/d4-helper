@@ -369,7 +369,7 @@ func (a *App) load(path string) (Workspace, error) {
 	if err != nil {
 		return Workspace{}, fmt.Errorf("读取配置失败: %w", err)
 	}
-	if info.Size() > 8*1024*1024 {
+	if info.Size() > timeline.MaxConfigBytes {
 		return Workspace{}, fmt.Errorf("配置文件不能超过 8MB")
 	}
 	data, err := os.ReadFile(path)
@@ -447,6 +447,9 @@ func writeConfiguration(path, raw string) (string, error) {
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return "", err
+	}
+	if len(data)+1 > timeline.MaxConfigBytes {
+		return "", fmt.Errorf("配置文件不能超过 8MB，请减少未使用的宏或录制轨迹")
 	}
 	// Write to the same directory, then replace atomically through MoveFileEx.
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".d4-config-*.tmp")

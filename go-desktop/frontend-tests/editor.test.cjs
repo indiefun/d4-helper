@@ -4,9 +4,11 @@ const fs=require('node:fs'),path=require('node:path');
 const {JSDOM}=require('jsdom');
 const root=path.join(__dirname,'..');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+function deferred(){let resolve;const promise=new Promise(done=>resolve=done);return{promise,resolve};}
 async function editor({legacy=false,transform,backend={}}={}){
  const dom=new JSDOM(fs.readFileSync(path.join(root,'frontend/index.html'),'utf8'),{runScripts:'outside-only',url:'http://localhost',pretendToBeVisual:true});
  dom.window.structuredClone=structuredClone;dom.window.confirm=()=>true;
+ let poll=()=>{};dom.window.setInterval=fn=>{poll=fn;return 1;};
  for(const file of ['model.js','graph-model.js','flow-model.js'])dom.window.eval(fs.readFileSync(path.join(root,'frontend',file),'utf8'));
  const {FlowModel:F,TimelineModel:M,GraphModel:G}=dom.window;
  const doc=M.demo();if(!legacy){doc.macros=G.demo().macros.map(m=>F.toMacro(F.fromMacro(m)));}
@@ -14,7 +16,7 @@ async function editor({legacy=false,transform,backend={}}={}){
  let saved,stops=0,runs=0,armed=0;
  dom.window.go={main:{App:{LoadConfiguration:async()=>({content:JSON.stringify(doc)}),StopAll:async()=>{stops++;},SaveAndApply:async raw=>{saved=JSON.parse(raw);return{content:raw};},SetArmed:async()=>{armed++;},TryMacro:async()=>{runs++;},...backend}}};
  dom.window.eval(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'));await tick();
- return{dom,d:dom.window.document,F,M,G,doc,saved:()=>saved,stops:()=>stops,runs:()=>runs,armed:()=>armed};
+ return{dom,d:dom.window.document,F,M,G,doc,poll:()=>poll(),saved:()=>saved,stops:()=>stops,runs:()=>runs,armed:()=>armed};
 }
 function change(el,value){el.value=value;el.dispatchEvent(new el.ownerDocument.defaultView.Event('change',{bubbles:true}));}
 function select(a,index){a.d.querySelectorAll('[data-node]')[index].querySelector('.node-heading').click();}
@@ -65,3 +67,84 @@ test('expansion rejects huge nested repetitions before generating preview',async
 test('poll receives recordings and keeps original movement points',async()=>{let sent=false;const raw={id:'recorded',name:'新录制',enabled:true,trigger:'none',loop:false,loop_wait_ms:0,duration_ms:200,tracks:[{id:'t',name:'mouse',muted:false,blocks:[{id:'b',type:'move',at_ms:0,duration_ms:200,x:100,y:200,from_x:0,from_y:0,path:[{at_ms:0,x:0,y:0},{at_ms:200,x:100,y:200}]}]}]};const a=await editor({backend:{Poll:async()=>({new_recordings:sent?[]:(sent=true,[raw])})}});try{
  assert.match(a.d.getElementById('macro-title').textContent,/新录制/);a.d.getElementById('save-button').click();await tick();const recorded=a.saved().macros.find(m=>m.id==='recorded');assert.equal(recorded.graph.root.items[0].action.path.length,2);
  }finally{a.dom.window.close();}});
+
+test('edits made while saving survive the response and prevent stale execution',async()=>{
+ const pending=deferred();let submitted,calls=0;
+ const a=await editor({backend:{SaveAndApply:raw=>{submitted=raw;calls++;return pending.promise;}}});try{
+  const d=a.d;change(d.querySelector('.wait [data-field="duration"]'),'400');
+  d.getElementById('run-button').click();await tick();
+  change(d.querySelector('.wait [data-field="duration"]'),'900');
+  d.getElementById('save-button').click();await tick();
+  assert.equal(calls,1,'only one save may be in flight');
+  const stops=a.stops();pending.resolve({content:submitted});await tick();await tick();
+  assert.equal(d.querySelector('.wait [data-field="duration"]').value,'900');
+  assert.equal(d.getElementById('saved-state').textContent,'未保存');
+  assert.ok(a.stops()>stops,'a stale save must disarm the applied plan');
+  assert.equal(a.runs(),0);assert.equal(a.armed(),0);
+  d.getElementById('undo').click();assert.equal(d.querySelector('.wait [data-field="duration"]').value,'400');
+ }finally{a.dom.window.close();}
+});
+
+test('pending key capture is cancelled on macro switch even with shared node IDs',async()=>{
+ const pending=deferred();let cancellations=0,captured='';
+ const a=await editor({transform:doc=>{const m=JSON.parse(JSON.stringify(doc.macros[0]));m.id='other';m.name='另一个宏';m.trigger='f2';doc.macros.push(m);},backend:{CaptureKey:()=>pending.promise,CancelCapture:async()=>{cancellations++;},Poll:async()=>({capture:captured})}});try{
+  a.d.querySelector('[data-capture]').click();await tick();
+  a.d.querySelectorAll('[data-macro]')[1].click();
+  pending.resolve();await tick();
+  assert.ok(cancellations>0,'switching macros cancels pending capture');
+  captured='z';await a.poll();assert.equal(a.d.querySelector('[data-field="key"]').value,'1');
+  assert.equal(a.d.getElementById('saved-state').textContent,'已保存');
+ }finally{a.dom.window.close();}
+});
+
+test('key capture applies only responses polled for the current request',async()=>{
+ let captured='',pending=null;const a=await editor({backend:{CaptureKey:async()=>{},CancelCapture:async()=>{},Poll:()=>pending?pending.promise:Promise.resolve({capture:captured})}});try{
+  a.d.querySelector('[data-capture]').click();await tick();
+  pending=deferred();const oldPoll=a.poll();
+  a.d.querySelector('[data-capture]').click();await tick();
+  pending.resolve({capture:'x'});await oldPoll;pending=null;
+  assert.equal(a.d.querySelector('[data-field="key"]').value,'1','an older poll cannot supply the new request');
+  captured='z';await a.poll();assert.equal(a.d.querySelector('[data-field="key"]').value,'z');
+  assert.equal(a.d.getElementById('saved-state').textContent,'未保存');
+ }finally{a.dom.window.close();}
+});
+
+test('save response preserves the selected macro and cancels its pending run',async()=>{
+ const pending=deferred();let submitted;
+ const a=await editor({transform:doc=>{const m=JSON.parse(JSON.stringify(doc.macros[0]));m.id='other';m.name='另一个宏';m.trigger='f2';doc.macros.push(m);},backend:{SaveAndApply:raw=>{submitted=raw;return pending.promise;}}});try{
+  change(a.d.querySelector('.wait [data-field="duration"]'),'400');a.d.getElementById('run-button').click();await tick();
+  a.d.querySelectorAll('[data-macro]')[1].click();pending.resolve({content:submitted});await tick();
+  assert.equal(a.d.getElementById('macro-title').textContent,'另一个宏');assert.equal(a.runs(),0);assert.equal(a.armed(),0);
+  assert.equal(a.d.getElementById('saved-state').textContent,'已保存');
+ }finally{a.dom.window.close();}
+});
+
+test('stop during save prevents rearming and opening waits for the save',async()=>{
+ const pending=deferred();let submitted,imports=0;
+ const a=await editor({backend:{SaveAndApply:raw=>{submitted=raw;return pending.promise;},ImportConfiguration:async()=>{imports++;return{};}}});try{
+  change(a.d.querySelector('.wait [data-field="duration"]'),'400');a.d.getElementById('run-button').click();await tick();
+  a.d.getElementById('open-button').click();await tick();assert.equal(imports,0);
+  a.d.getElementById('stop-button').click();await tick();const stops=a.stops();
+  pending.resolve({content:submitted});await tick();assert.ok(a.stops()>stops);assert.equal(a.runs(),0);assert.equal(a.armed(),0);
+ }finally{a.dom.window.close();}
+});
+
+test('edits while arming prevent both running and recording',async()=>{
+ for(const button of ['run-button','record-button']){
+  const pending=deferred();let recordings=0;
+  const a=await editor({backend:{SetArmed:()=>pending.promise,BeginRecordingAfterSwitch:async()=>{recordings++;}}});try{
+   a.d.getElementById(button).click();await tick();change(a.d.querySelector('.wait [data-field="duration"]'),'400');
+   const stops=a.stops();pending.resolve();await tick();assert.ok(a.stops()>stops);assert.equal(a.runs(),0);assert.equal(recordings,0);
+  }finally{a.dom.window.close();}
+ }
+});
+
+test('screen position captured for an old macro cannot change the new macro',async()=>{
+ const pending=deferred();
+ const a=await editor({legacy:true,transform:(doc,{M})=>{const m=M.macro('移动宏');m.tracks[0].blocks=[M.block('move',0)];M.syncTiming(m);const other=JSON.parse(JSON.stringify(m));other.id='other';other.name='另一个移动宏';doc.macros=[m,other];},backend:{CapturePosition:()=>pending.promise}});try{
+  a.d.querySelector('[data-pick]').click();await tick();a.d.querySelectorAll('[data-macro]')[1].click();
+  pending.resolve({X:123,Y:456});await tick();
+  assert.equal(a.d.querySelector('.node-card.move [data-field="x"]').value,'800');
+  assert.equal(a.d.getElementById('saved-state').textContent,'已保存');
+ }finally{a.dom.window.close();}
+});

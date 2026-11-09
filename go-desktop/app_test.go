@@ -6,6 +6,7 @@ import (
 	"github.com/indiefun/d4-helper/go-desktop/internal/timeline"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +50,40 @@ func TestTimelineSaveReloadAndRuntime(t *testing.T) {
 	p, err := a.PreviewMacro(raw, cfg.Macros[0].ID)
 	if err != nil || p.Count != 6 {
 		t.Fatal("timeline preview mismatch", err)
+	}
+}
+
+func TestOversizedFormattedSavePreservesExistingWorkspace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace.timeline.json")
+	original := testDocument(t)
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, cfg, err := timeline.Normalize(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.WindowTitle = ""
+	base, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The compact document fits, but indentation makes the saved file exceed
+	// the loader's limit. Reject it before replacing the user's existing file.
+	cfg.WindowTitle = strings.Repeat("x", timeline.MaxConfigBytes-len(base)-1)
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := timeline.Normalize(string(raw)); err != nil {
+		t.Fatal("compact document should fit", err)
+	}
+	if _, err := writeConfiguration(path, string(raw)); err == nil {
+		t.Fatal("saved an oversized file that cannot be reopened")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != original {
+		t.Fatal("failed save replaced the original workspace", err)
 	}
 }
 

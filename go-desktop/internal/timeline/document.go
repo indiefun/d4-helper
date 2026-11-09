@@ -15,6 +15,7 @@ import (
 
 const SchemaVersion = 3
 const MaxEvents = 100000
+const MaxConfigBytes = 8 * 1024 * 1024
 
 type Block struct {
 	ID         string     `json:"id"`
@@ -147,7 +148,7 @@ func normalize(raw string, editing bool) (string, Config, error) {
 		return "", c, err
 	}
 	b, err := json.Marshal(c)
-	if len(b) > 8*1024*1024 {
+	if len(b) > MaxConfigBytes {
 		return "", c, fmt.Errorf("配置文件不能超过 8MB，请减少未使用的宏或录制轨迹")
 	}
 	return string(b), c, err
