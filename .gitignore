@@ -18,6 +18,9 @@ native/*.obj
 # Local logs
 *.log
 
+# Cloudflare Wrangler
+.wrangler/
+
 # Local editor and OS files
 .vscode/
 .idea/

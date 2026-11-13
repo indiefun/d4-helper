@@ -1,0 +1,7 @@
+{
+  "name": "d4-helper",
+  "compatibility_date": "2026-11-09",
+  "assets": {
+    "directory": "./site"
+  }
+}
