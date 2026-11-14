@@ -18,5 +18,5 @@ if (-not (Test-Path -LiteralPath $distConfigPath)) {
 }
 [System.IO.File]::WriteAllText((Join-Path $PSScriptRoot 'dist\VERSION'), "$version`n", [System.Text.UTF8Encoding]::new($false))
 $portableArchive = Join-Path $PSScriptRoot "dist\D4Helper-portable-v$version.zip"
-Compress-Archive -LiteralPath .\dist\D4Helper.exe, $distConfigPath, .\dist\VERSION -DestinationPath $portableArchive -CompressionLevel Optimal -Force
+Compress-Archive -LiteralPath .\dist\D4Helper.exe, $distConfigPath, .\dist\VERSION, .\LICENSE, .\NOTICE, .\LICENSES -DestinationPath $portableArchive -CompressionLevel Optimal -Force
 Copy-Item -LiteralPath $portableArchive -Destination .\dist\D4Helper-windows-latest.zip -Force

@@ -1,167 +1,580 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>D4Helper - 按角色切换宏配置的暗黑 4 助手</title>
-  <meta name="description" content="D4Helper v1.7 支持按角色管理 Profile，独立保存宏和一键启动配置。提供自动按住、循环连按、录制回放和游戏内状态浮层，适用于 Windows 上的暗黑破坏神 IV。">
-  <meta property="og:title" content="D4Helper - 按角色切换宏配置的暗黑 4 助手">
-  <meta property="og:description" content="为不同角色保存独立的宏与一键启动配置，点击 Profile 标签即可切换。Windows 免安装，开源免费。">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="assets/config-window.png">
-  <link rel="icon" href="assets/favicon.ico">
-  <link rel="stylesheet" href="styles.css">
-  <script src="script.js" defer></script>
-</head>
-<body>
-  <a class="skip-link" href="#top">跳到正文</a>
-  <header class="topbar">
-    <a class="brand" href="#top" aria-label="D4Helper 首页">
-      <img class="brand-mark" src="assets/app-icon.png" alt="" width="38" height="38">
-      <span>D4Helper</span>
-    </a>
-    <nav class="nav" aria-label="页面导航">
-      <a href="#profiles">角色配置</a>
-      <a href="#features">功能</a>
-      <a href="#screenshots">截图</a>
-      <a href="#usage">使用</a>
-      <a href="#download">下载</a>
-    </nav>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#151412" />
+    <title>D4Helper · 免费开源的暗黑 4 宏助手</title>
+    <meta
+      name="description"
+      content="D4Helper 是免费开源的暗黑破坏神 IV Windows 宏助手，采用 GPL-3.0 协议。自动按住、循环连按、录制回放，按角色保存配置；免安装，三步上手。"
+    />
+    <meta property="og:title" content="D4Helper · 免费开源的暗黑 4 宏助手" />
+    <meta
+      property="og:description"
+      content="少一点重复按键，多一点专注游戏。Windows 解压即用，所有功能免费，源码公开。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="assets/config-window.png" />
+    <link rel="icon" href="assets/favicon.ico" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#top">跳到正文</a>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="D4Helper 首页">
+        <img
+          class="brand-mark"
+          src="assets/app-icon.png"
+          alt=""
+          width="38"
+          height="38"
+        />
+        <span>D4Helper</span>
+      </a>
+      <nav class="nav" aria-label="页面导航">
+        <a href="#usage">快速上手</a>
+        <a href="#features">功能介绍</a>
+        <a href="#open-source">开源许可</a>
+        <a
+          class="nav-github"
+          href="https://github.com/indiefun/d4-helper"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub 仓库（新标签页打开）"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.13.68-3.79-1.33-3.79-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.72 1.16 1.72 1.16 1 1.71 2.63 1.22 3.27.93.1-.73.39-1.22.71-1.5-2.5-.28-5.12-1.25-5.12-5.56 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .95-.3 3.1 1.15A10.8 10.8 0 0 1 12 6.16c.96 0 1.92.13 2.82.38 2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.7.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.32-2.63 5.28-5.13 5.56.4.35.76 1.03.76 2.08v3.1c0 .3.2.65.77.54A11.25 11.25 0 0 0 12 .75Z"
+            />
+          </svg>
+          GitHub <span aria-hidden="true">↗</span>
+        </a>
+        <a class="nav-download" href="#download">免费下载</a>
+      </nav>
+    </header>
 
-  <main id="top">
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">D4Helper v1.7.0 · Windows</p>
-        <h1><span>换个角色，</span><span>配置也跟着切换。</span></h1>
-        <p class="lead">为野蛮人、法师或不同玩法保存独立的宏和一键启动配置。点击 Profile 标签就能切换，少一点重复设置，多一点专注游戏。</p>
-        <div class="hero-actions">
-          <a class="button primary" href="https://gh-proxy.com/https://github.com/indiefun/d4-helper/releases/latest/download/D4Helper-windows-latest.zip">下载 Windows 版</a>
-          <a class="button secondary" href="https://github.com/indiefun/d4-helper/releases/latest">GitHub Release</a>
+    <main id="top" tabindex="-1">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <a class="open-badge" href="#open-source"
+            ><span class="status-dot" aria-hidden="true"></span>免费使用 ·
+            GPL-3.0 开源 <span aria-hidden="true">↗</span></a
+          >
+          <p class="eyebrow">D4Helper / 暗黑破坏神 IV / Windows</p>
+          <h1 id="hero-title">
+            少一点重复按键，<br /><span>多一点专注游戏。</span>
+          </h1>
+          <p class="lead">
+            一个轻量的暗黑 4
+            宏助手。自动长按、循环连按、录制回放，按一次快捷键就能开关；不同角色的配置，也能单独保存。
+          </p>
+          <div class="hero-actions">
+            <a
+              class="button primary"
+              href="https://gh-proxy.com/https://github.com/indiefun/d4-helper/releases/latest/download/D4Helper-windows-latest.zip"
+              >免费下载 Windows 版 <span aria-hidden="true">↓</span></a
+            >
+            <a class="button secondary" href="#usage"
+              >查看上手步骤 <span aria-hidden="true">→</span></a
+            >
+          </div>
+          <p class="download-note">
+            v1.7.0 · 解压即用 · 国内加速下载 <span aria-hidden="true">/</span>
+            <a href="https://github.com/indiefun/d4-helper/releases/latest"
+              >GitHub 官方下载 ↗</a
+            >
+          </p>
+          <p class="hero-note">
+            <span class="status-dot" aria-hidden="true"></span
+            >仅在匹配的游戏窗口前台生效，切出游戏自动停止并释放按键。
+          </p>
         </div>
-        <p class="hero-note">只在匹配的暗黑 4 窗口前台时生效，切出游戏自动停止宏并释放按键。</p>
-        <dl class="hero-stats" aria-label="工具特点">
-          <div><dt>Profile</dt><dd>角色配置独立保存</dd></div>
-          <div><dt>1ms</dt><dd>最低调度间隔</dd></div>
-          <div><dt>MIT</dt><dd>开源 · 解压即用</dd></div>
-        </dl>
-      </div>
-      <div class="hero-panel" aria-label="Profile 配置切换示例">
-        <div class="panel-header"><strong>Profile</strong><span>配置切换示例</span></div>
-        <div class="demo-tabs" role="tablist" aria-label="查看不同角色的配置示例">
-          <button id="tab-barbarian" role="tab" aria-selected="true" aria-controls="demo-barbarian" data-profile="barbarian">野蛮人</button>
-          <button id="tab-sorcerer" role="tab" aria-selected="false" aria-controls="demo-sorcerer" data-profile="sorcerer" tabindex="-1">法师</button>
-          <button id="tab-druid" role="tab" aria-selected="false" aria-controls="demo-druid" data-profile="druid" tabindex="-1">德鲁伊</button>
+
+        <div class="hero-panel" aria-label="角色配置交互示例">
+          <div class="panel-header">
+            <div>
+              <img
+                src="assets/app-icon.png"
+                alt=""
+                width="24"
+                height="24"
+              /><strong>一套角色，一套配置</strong>
+            </div>
+            <span>交互示例</span>
+          </div>
+          <div
+            class="demo-tabs"
+            role="tablist"
+            aria-label="查看不同角色的配置示例"
+          >
+            <button
+              id="tab-barbarian"
+              role="tab"
+              aria-selected="true"
+              aria-controls="demo-barbarian"
+              data-profile="barbarian"
+            >
+              野蛮人
+            </button>
+            <button
+              id="tab-sorcerer"
+              role="tab"
+              aria-selected="false"
+              aria-controls="demo-sorcerer"
+              data-profile="sorcerer"
+              tabindex="-1"
+            >
+              法师
+            </button>
+            <button
+              id="tab-druid"
+              role="tab"
+              aria-selected="false"
+              aria-controls="demo-druid"
+              data-profile="druid"
+              tabindex="-1"
+            >
+              德鲁伊
+            </button>
+          </div>
+          <div
+            id="demo-barbarian"
+            class="macro-preview"
+            role="tabpanel"
+            aria-labelledby="tab-barbarian"
+            tabindex="0"
+          >
+            <div class="macro-row">
+              <kbd>F1</kbd><strong>交互</strong><span>循环连按</span>
+            </div>
+            <div class="macro-row">
+              <kbd>F3</kbd><strong>旋风斩</strong><span>自动按住</span>
+            </div>
+            <div class="macro-row">
+              <kbd>F4</kbd><strong>增益技能</strong><span>循环连按</span>
+            </div>
+            <div class="demo-launch">
+              <span>鼠标中键 · 一键启动</span
+              ><strong>交互 / 旋风斩 / 增益技能</strong>
+            </div>
+          </div>
+          <div
+            id="demo-sorcerer"
+            class="macro-preview"
+            role="tabpanel"
+            aria-labelledby="tab-sorcerer"
+            tabindex="0"
+            hidden
+          >
+            <div class="macro-row">
+              <kbd>F1</kbd><strong>交互</strong><span>循环连按</span>
+            </div>
+            <div class="macro-row">
+              <kbd>F2</kbd><strong>主技能</strong><span>自动按住</span>
+            </div>
+            <div class="macro-row">
+              <kbd>F3</kbd><strong>护盾组合</strong><span>录制回放</span>
+            </div>
+            <div class="demo-launch">
+              <span>鼠标中键 · 一键启动</span><strong>主技能 / 护盾组合</strong>
+            </div>
+          </div>
+          <div
+            id="demo-druid"
+            class="macro-preview"
+            role="tabpanel"
+            aria-labelledby="tab-druid"
+            tabindex="0"
+            hidden
+          >
+            <div class="macro-row">
+              <kbd>F1</kbd><strong>交互</strong><span>循环连按</span>
+            </div>
+            <div class="macro-row">
+              <kbd>F2</kbd><strong>风暴技能</strong><span>自动按住</span>
+            </div>
+            <div class="macro-row">
+              <kbd>F4</kbd><strong>辅助技能</strong><span>循环连按</span>
+            </div>
+            <div class="demo-launch">
+              <span>鼠标中键 · 一键启动</span
+              ><strong>风暴技能 / 辅助技能</strong>
+            </div>
+          </div>
+          <p class="demo-caption">
+            点击上方角色切换示例。实际宏与快捷键可自行配置。
+          </p>
         </div>
-        <div id="demo-barbarian" class="macro-preview" role="tabpanel" aria-labelledby="tab-barbarian" tabindex="0">
-          <div class="macro-row"><span>F1</span><strong>交互</strong><em>循环连按</em></div>
-          <div class="macro-row"><span>F3</span><strong>旋风斩</strong><em>自动按住</em></div>
-          <div class="macro-row"><span>F4</span><strong>增益技能</strong><em>循环连按</em></div>
-          <div class="demo-launch"><span>鼠标中键 · 一键启动</span><strong>交互 / 旋风斩 / 增益技能</strong></div>
+      </section>
+
+      <section id="usage" class="section usage" aria-labelledby="usage-title">
+        <div class="section-heading">
+          <p class="eyebrow">快速上手</p>
+          <h2 id="usage-title">三步开始，先试默认配置。</h2>
+          <p>不必先研究所有设置，跑通第一个宏后，再按自己的习惯调整。</p>
         </div>
-        <div id="demo-sorcerer" class="macro-preview" role="tabpanel" aria-labelledby="tab-sorcerer" tabindex="0" hidden>
-          <div class="macro-row"><span>F1</span><strong>交互</strong><em>循环连按</em></div>
-          <div class="macro-row"><span>F2</span><strong>主技能</strong><em>自动按住</em></div>
-          <div class="macro-row"><span>F3</span><strong>护盾组合</strong><em>录制回放</em></div>
-          <div class="demo-launch"><span>鼠标中键 · 一键启动</span><strong>主技能 / 护盾组合</strong></div>
+        <ol class="steps">
+          <li>
+            <span class="step-number">01</span>
+            <h3>下载并解压</h3>
+            <p>
+              下载 Windows
+              压缩包，解压到一个文件夹。无需安装，保留包内文件在一起即可。
+            </p>
+            <a class="text-link" href="#download"
+              >前往下载 <span aria-hidden="true">→</span></a
+            >
+          </li>
+          <li>
+            <span class="step-number">02</span>
+            <h3>运行并保存</h3>
+            <p>
+              打开
+              <code>D4Helper.exe</code
+              >，先保留“默认配置”，点击“保存并应用”。默认已匹配暗黑 4。
+            </p>
+          </li>
+          <li>
+            <span class="step-number">03</span>
+            <h3>回到游戏，按键开启</h3>
+            <p>
+              进入暗黑 4，按
+              <kbd>F1</kbd>
+              试用交互连按；再按一次关闭。游戏左上方浮层会显示宏状态。
+            </p>
+          </li>
+        </ol>
+        <div class="starter-tip">
+          <strong>记住一个用法就够了</strong>
+          <p>
+            按一次开启，再按一次关闭。切出游戏会自动停止，切回后需重新按键开启。
+          </p>
         </div>
-        <div id="demo-druid" class="macro-preview" role="tabpanel" aria-labelledby="tab-druid" tabindex="0" hidden>
-          <div class="macro-row"><span>F1</span><strong>交互</strong><em>循环连按</em></div>
-          <div class="macro-row"><span>F2</span><strong>风暴技能</strong><em>自动按住</em></div>
-          <div class="macro-row"><span>F4</span><strong>辅助技能</strong><em>循环连按</em></div>
-          <div class="demo-launch"><span>鼠标中键 · 一键启动</span><strong>风暴技能 / 辅助技能</strong></div>
+        <details class="shortcut-details">
+          <summary>
+            查看全部默认快捷键<span>已有配置以自己的设置为准</span>
+          </summary>
+          <dl class="shortcut-grid">
+            <div>
+              <dt><kbd>F1</kbd></dt>
+              <dd>交互：每 100ms 短按 F</dd>
+            </div>
+            <div>
+              <dt><kbd>F2</kbd></dt>
+              <dd>右键连点：间隔 100ms</dd>
+            </div>
+            <div>
+              <dt><kbd>F3</kbd></dt>
+              <dd>旋风斩：持续按住右键</dd>
+            </div>
+            <div>
+              <dt><kbd>F4</kbd></dt>
+              <dd>增益技能：循环 2 → 1 → 3 → 4</dd>
+            </div>
+            <div>
+              <dt><kbd>F5</kbd></dt>
+              <dd>大招：每 1000ms 短按左键</dd>
+            </div>
+            <div>
+              <dt><kbd>F12</kbd></dt>
+              <dd>开始或结束游戏内宏录制</dd>
+            </div>
+            <div class="shortcut-wide">
+              <dt><kbd>鼠标中键</kbd></dt>
+              <dd>一键开关交互、旋风斩、增益技能和大招；右键连点单独控制。</dd>
+            </div>
+          </dl>
+        </details>
+      </section>
+
+      <section id="features" class="section" aria-labelledby="features-title">
+        <div class="section-heading">
+          <p class="eyebrow">功能介绍</p>
+          <h2 id="features-title">常用操作，交给一个快捷键。</h2>
+          <p>从简单长按到一组技能，按自己的玩法搭配。</p>
         </div>
-        <p class="demo-caption">点击角色标签查看示例。实际宏和快捷键由你自行配置。</p>
-      </div>
-    </section>
+        <div class="feature-grid">
+          <article>
+            <span class="feature-label">持续施放</span>
+            <h3>自动按住</h3>
+            <p>
+              不用一直按着鼠标或键盘。设置目标按键，按一次快捷键持续按住，再按一次释放。
+            </p>
+          </article>
+          <article>
+            <span class="feature-label">重复操作</span>
+            <h3>循环连按</h3>
+            <p>
+              按顺序循环触发最多 4 个按键，间隔可调。交互、技能连按，从默认
+              100ms 开始试用。
+            </p>
+          </article>
+          <article>
+            <span class="feature-label">组合动作</span>
+            <h3>录制回放</h3>
+            <p>
+              游戏内按 F12
+              录下按键和鼠标点击，再按一次结束。配置后可执行一次或循环回放。
+            </p>
+          </article>
+          <article>
+            <span class="feature-label">一起开关</span>
+            <h3>一键启动</h3>
+            <p>勾选要控制的宏，用一个快捷键成组开启或关闭，无需挨个操作。</p>
+          </article>
+          <article>
+            <span class="feature-label">切换角色</span>
+            <h3>独立角色配置</h3>
+            <p>
+              为不同角色或玩法新建
+              Profile，分别保存宏和一键启动。点击标签切换，当前编辑自动保存。
+            </p>
+          </article>
+          <article>
+            <span class="feature-label">随时确认</span>
+            <h3>游戏内状态浮层</h3>
+            <p>
+              开关键、宏名称和运行状态一眼可见。浮层支持鼠标穿透和接近避让，程序可隐藏到托盘。
+            </p>
+          </article>
+        </div>
+      </section>
 
-    <section id="profiles" class="section profile-intro">
-      <div class="section-heading">
-        <p class="eyebrow">New in v1.7</p>
-        <h2>每个角色，有自己的一页配置</h2>
-        <p>宏不用堆在同一页，切换角色也不必重新勾选一键启动。</p>
-      </div>
-      <div class="feature-grid">
-        <article><span class="feature-number">01</span><h3>直接新建，随时改名</h3><p>点击“新建”就得到空白的“配置 1、配置 2……”。可以重命名为角色或玩法，也可以删除不再使用的配置。</p></article>
-        <article><span class="feature-number">02</span><h3>宏和一键启动各自保存</h3><p>每个 Profile 有自己的宏、录制内容、一键启动快捷键和勾选项。不同 Profile 可以使用相同的宏名称和快捷键。</p></article>
-        <article><span class="feature-number">03</span><h3>点击切换，自动保存</h3><p>切换时保存当前编辑并应用目标配置，重启恢复上次选中项。切换会先停止宏并释放按键，回到游戏后再用快捷键启动。</p></article>
-      </div>
-      <p class="section-note">浮层、窗口匹配和录制快捷键为公共设置。旧配置会自动迁移到“默认配置”；新建 Profile 从空白开始。</p>
-    </section>
+      <section
+        id="screenshots"
+        class="section screenshots"
+        aria-labelledby="screenshots-title"
+      >
+        <div class="section-heading">
+          <p class="eyebrow">软件界面</p>
+          <h2 id="screenshots-title">设置在这里，状态在游戏里。</h2>
+          <p>在配置页调整宏和快捷键，回到游戏通过浮层确认开关状态。</p>
+        </div>
+        <div class="shot-grid">
+          <figure class="config-shot">
+            <a
+              href="assets/config-window.png"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="查看完整配置界面截图（新标签页打开）"
+              ><img
+                src="assets/config-window.png"
+                alt="D4Helper v1.7.0 配置界面，包含角色标签、宏设置、一键启动和保存并应用按钮"
+                loading="lazy"
+                width="1177"
+                height="919"
+            /></a>
+            <figcaption>配置页面 · 点击查看原图</figcaption>
+          </figure>
+          <div class="screenshot-aside">
+            <figure class="overlay-shot">
+              <img
+                src="assets/overlay.png"
+                alt="游戏内浮层，按行显示宏的开关键、名称与开关状态"
+                loading="lazy"
+                width="252"
+                height="148"
+              />
+              <figcaption>游戏内浮层 · 只显示当前配置的宏状态</figcaption>
+            </figure>
+            <div class="screenshot-tip">
+              <h3>想为另一个角色建配置？</h3>
+              <p>
+                点击“新建”，再用“重命名”改成角色或玩法名称。新配置从空白开始，需要添加自己的宏。
+              </p>
+              <p>切换配置会先停止正在运行的宏，回到游戏后按快捷键重新开启。</p>
+              <a
+                class="text-link"
+                href="https://github.com/indiefun/d4-helper#profile-标签"
+                >查看完整配置说明 ↗</a
+              >
+            </div>
+          </div>
+        </div>
+      </section>
 
-    <section id="features" class="section">
-      <div class="section-heading"><p class="eyebrow">Features</p><h2>减少长按和重复按键</h2><p>按一次开启，再按一次关闭。按你的习惯配置动作与快捷键。</p></div>
-      <div class="feature-grid">
-        <article><h3>自动按住</h3><p>最多设置 4 个按键槽位，同时按住其中所有非空按键，再按一次开关键全部释放。支持键盘和鼠标左键、右键、中键。</p></article>
-        <article><h3>循环连按</h3><p>按 4 个槽位的顺序循环短按并跳过空槽位。间隔默认 100ms，可手动调整，最低 1ms；实际时序受系统和游戏影响。</p></article>
-        <article><h3>录制回放</h3><p>在游戏内按 F12 开始倒计时，再按一次结束录制。支持执行一次或循环回放，记录鼠标点击落点，不录制移动轨迹。</p></article>
-        <article><h3>一键启动</h3><p>用一个快捷键控制选中的一组宏，可添加多组并单独启用。每个 Profile 独立保存这些组合，取消勾选也会正确保留。</p></article>
-        <article><h3>游戏内状态浮层</h3><p>显示当前 Profile 的宏名称、开关键、开关状态和录制进度。从游戏窗口左上方显示，鼠标穿透，接近时自动避让。</p></article>
-        <article><h3>窗口限定与托盘运行</h3><p>切出游戏会停止宏并释放输入，切回后不会自动恢复。配置好后可隐藏到托盘，退出时清理按住的鼠标和键盘状态。</p></article>
-      </div>
-    </section>
+      <section
+        id="open-source"
+        class="section open-source"
+        aria-labelledby="open-source-title"
+      >
+        <div class="source-copy">
+          <p class="eyebrow">免费使用 · 源码公开</p>
+          <h2 id="open-source-title">免费开源，欢迎参与。</h2>
+          <p>
+            D4Helper 由 Kevin Loo 维护，所有功能免费使用。项目采用
+            <strong>GNU GPL v3.0</strong>，欢迎查看源码、修改和参与改进。
+          </p>
+          <p>
+            再发布修改版时，请保留版权与许可声明、标明修改，并按 GPL-3.0
+            提供对应源码。允许改名和商业分发，不能将受许可约束的衍生代码改为闭源发布。
+          </p>
+          <a
+            class="text-link"
+            href="https://github.com/indiefun/d4-helper/blob/master/NOTICE"
+            >了解版权与历史版本许可 <span aria-hidden="true">↗</span></a
+          >
+        </div>
+        <div class="source-links">
+          <a
+            href="https://github.com/indiefun/d4-helper"
+            target="_blank"
+            rel="noopener noreferrer"
+            ><span
+              ><strong>浏览 GitHub 仓库</strong
+              ><small>indiefun / d4-helper</small></span
+            ><span aria-hidden="true">↗</span></a
+          >
+          <a href="https://github.com/indiefun/d4-helper/blob/master/LICENSE"
+            ><span
+              ><strong>GPL-3.0 许可全文</strong
+              ><small>查看使用、修改与分发条款</small></span
+            ><span aria-hidden="true">↗</span></a
+          >
+          <a href="https://github.com/indiefun/d4-helper/issues"
+            ><span
+              ><strong>反馈问题与建议</strong
+              ><small>提交 Issue，帮助项目变得更好</small></span
+            ><span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </section>
 
-    <section id="screenshots" class="section screenshots">
-      <div class="section-heading"><p class="eyebrow">Screenshots</p><h2>公共设置在外，角色配置在内</h2><p>Profile 中只保留宏配置和一键启动；内容较多时可以滚动，公共设置、支持入口和保存按钮保持可见。</p></div>
-      <div class="shot-grid">
-        <figure class="config-shot"><a href="assets/config-window.png" aria-label="查看完整配置界面截图"><img src="assets/config-window.png" alt="D4Helper v1.7.0 配置界面：上方公共设置，中间 Profile 标签、宏配置和一键启动，下方支持与反馈" loading="lazy" width="1177" height="919"></a><figcaption>v1.7.0 配置界面。点击截图可查看原图。</figcaption></figure>
-        <figure class="overlay-shot"><img src="assets/overlay.png" alt="游戏内状态浮层，显示宏开关键、名称和开关状态" loading="lazy" width="252" height="148"><figcaption>只显示当前配置的宏状态。浮层透明度和鼠标避让可在“高级设置”中调整。</figcaption></figure>
-      </div>
-    </section>
+      <section
+        id="download"
+        class="section download"
+        aria-labelledby="download-title"
+      >
+        <div>
+          <p class="eyebrow">Windows · 最新稳定版 v1.7.0</p>
+          <h2 id="download-title">准备好了？解压就能用。</h2>
+          <p>所有功能免费，无需安装。下载包内含程序、默认配置和版本文件。</p>
+          <p class="download-note">
+            国内加速由第三方 GitHub 代理提供；访问失败时，请使用 GitHub
+            官方下载。已发布的 v1.7.0 仍沿用 MIT 许可，当前源码许可见<a
+              href="#open-source"
+              >开源说明</a
+            >。
+          </p>
+        </div>
+        <div class="download-actions">
+          <a
+            class="button primary"
+            href="https://gh-proxy.com/https://github.com/indiefun/d4-helper/releases/latest/download/D4Helper-windows-latest.zip"
+            >免费下载 Windows 版 <span aria-hidden="true">↓</span></a
+          >
+          <a
+            class="button secondary"
+            href="https://github.com/indiefun/d4-helper/releases/latest"
+            >GitHub 官方下载 <span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </section>
 
-    <section id="usage" class="section usage">
-      <div class="section-heading"><p class="eyebrow">Quick start</p><h2>从默认配置开始，再为角色建一页</h2></div>
-      <ol class="steps">
-        <li><span>1</span><div><h3>解压并运行</h3><p>解压下载包，运行 D4Helper.exe。默认已匹配暗黑 4；需要调整时打开“高级设置 → 窗口匹配”。</p></div></li>
-        <li><span>2</span><div><h3>准备角色 Profile</h3><p>可以直接试用“默认配置”，或点击“新建”创建空白页，再用“重命名”改成自己的角色或玩法。</p></div></li>
-        <li><span>3</span><div><h3>设置宏和一键启动</h3><p>添加宏并选择动作、槽位和间隔。点“录”绑定按键，点“选”选择常用键；在“一键启动”中勾选要控制的宏。</p></div></li>
-        <li><span>4</span><div><h3>保存并回到游戏</h3><p>点击“保存并应用”，回到暗黑 4 使用快捷键。以后点击标签切换整套配置，切换时会自动保存当前编辑。</p></div></li>
-      </ol>
-    </section>
+      <section id="faq" class="section faq" aria-labelledby="faq-title">
+        <div class="section-heading">
+          <p class="eyebrow">常见问题</p>
+          <h2 id="faq-title">第一次用，可能会问到。</h2>
+        </div>
+        <div class="faq-list">
+          <details>
+            <summary>按快捷键没有反应，先检查什么？</summary>
+            <div>
+              <p>
+                先确认暗黑 4
+                窗口位于前台，目标宏已勾选启用，并点击过“保存并应用”。默认快捷键只适用于初始配置，已有配置以自己的设置为准。
+              </p>
+              <p>
+                仍无反应时，检查“高级设置 →
+                窗口匹配”。如果游戏以管理员权限运行，D4Helper 也需要相同权限。
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>如何升级，才能保留自己的配置？</summary>
+            <div>
+              <p>
+                先退出旧程序，备份并保留原来的
+                <code>config.json</code
+                >，不要用下载包内的默认配置覆盖它，再替换程序及其他发布文件。旧版宏会保留在“默认配置”中。
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>切出游戏或切换角色配置后，宏会继续运行吗？</summary>
+            <div>
+              <p>
+                不会。切出游戏或切换 Profile
+                都会停止宏并释放按键。切回游戏后，使用快捷键重新开启，避免意外恢复操作。
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>免费使用和 GPL-3.0，分别意味着什么？</summary>
+            <div>
+              <p>
+                使用官方程序无需付费，打赏完全自愿。个人修改自用无需公开源码；对外分发程序或修改版时，需按
+                GPL-3.0 保留版权与许可、标明修改并提供对应源码。
+              </p>
+              <p>
+                GPL
+                允许改名和收费分发，不代表可以抹掉原作者版权或冒充官方。此前已按
+                MIT 发布的版本继续适用原 MIT 授权，当前源码的许可详见仓库中的
+                LICENSE 与 NOTICE。
+              </p>
+            </div>
+          </details>
+        </div>
+        <a
+          class="text-link docs-link"
+          href="https://github.com/indiefun/d4-helper#使用教程"
+          >阅读完整使用文档 <span aria-hidden="true">↗</span></a
+        >
+      </section>
 
-    <section class="section details" aria-label="默认配置与使用说明">
-      <div class="detail-card"><h2>默认配置快捷键</h2><ul>
-        <li><strong>F1</strong><span>交互，每 100ms 短按 F</span></li>
-        <li><strong>F2</strong><span>右键连点，间隔 100ms</span></li>
-        <li><strong>F3</strong><span>旋风斩，自动按住右键</span></li>
-        <li><strong>F4</strong><span>增益技能，循环 2 → 1 → 3 → 4</span></li>
-        <li><strong>F5</strong><span>大招，每 1000ms 短按左键</span></li>
-        <li><strong>鼠标中键</strong><span>一键开关 F1、F3、F4、F5 对应的宏</span></li>
-        <li><strong>F12</strong><span>开始或结束游戏内录制</span></li>
-      </ul></div>
-      <div class="detail-card"><h2>使用前了解</h2><ul>
-        <li><strong>已有配置</strong><span>默认按键仅适用于初始配置，你已有的设置会保留。</span></li>
-        <li><strong>切换配置</strong><span>只切换设置，宏需要通过快捷键重新启动。</span></li>
-        <li><strong>录制内容</strong><span>保存到录制时的 Profile，新增录制宏需要手动勾选启用。</span></li>
-        <li><strong>鼠标避让</strong><span>默认 72 像素，可调整为 16–400 像素或关闭。</span></li>
-        <li><strong>输入间隔</strong><span>原生输入内核支持最低 1ms 的调度目标，建议先从 100ms 试用。</span></li>
-        <li><strong>运行权限</strong><span>游戏以管理员权限运行时，D4Helper 也需要相同权限。</span></li>
-      </ul></div>
-    </section>
+      <section class="section support" aria-labelledby="support-title">
+        <div>
+          <p class="eyebrow">一起让它更好用</p>
+          <h2 id="support-title">反馈问题，也欢迎分享配置。</h2>
+          <p>
+            在
+            <a href="https://github.com/indiefun/d4-helper/issues"
+              >GitHub 提交 Issue ↗</a
+            >，或加入 QQ 交流群：<strong>958154728</strong>。
+          </p>
+          <p>
+            如果工具帮到了你，也可以扫码支持维护。打赏完全自愿，不影响任何功能。
+          </p>
+        </div>
+        <figure class="donate-code">
+          <img
+            src="assets/donate.jpg"
+            alt="自愿打赏二维码"
+            loading="lazy"
+            width="170"
+            height="170"
+          />
+          <figcaption>自愿支持项目维护</figcaption>
+        </figure>
+      </section>
+    </main>
 
-    <section id="download" class="section download">
-      <div><p class="eyebrow">Download · v1.7.0</p><h2>下载、解压，开始配置</h2><p>发布包包含 <code>D4Helper.exe</code>、<code>config.json</code> 和 <code>VERSION</code>。国内加速使用第三方 GitHub 代理，无法访问时请使用 GitHub Release。</p><p>升级前退出旧程序，并保留自己的 <code>config.json</code>，不要用压缩包中的初始配置覆盖它。</p></div>
-      <div class="download-actions">
-        <a class="button primary" href="https://gh-proxy.com/https://github.com/indiefun/d4-helper/releases/latest/download/D4Helper-windows-latest.zip">国内加速下载</a>
-        <a class="button secondary" href="https://github.com/indiefun/d4-helper/releases/latest">GitHub Release</a>
-        <a class="button secondary" href="https://github.com/indiefun/d4-helper/blob/master/README.md">完整使用说明</a>
-      </div>
-    </section>
-
-    <section class="section updates">
-      <div class="section-heading"><p class="eyebrow">Release notes</p><h2>这两个版本，改了什么</h2></div>
-      <div class="update-grid">
-        <article><p class="release-version">v1.7.0 <span>本次更新</span></p><h3>加入角色 Profile</h3><p>独立保存宏和一键启动，切换自动保存，重启恢复选中项。公共设置移出标签内容，长列表支持滚动；修复一键启动勾选恢复的问题。</p></article>
-        <article><p class="release-version">v1.6.0</p><h3>精简界面，更新输入内核</h3><p>移除路线地图、浮层拖动和布局编辑快捷键，F10、F11 可自由绑定宏。加入原生高精度输入内核和鼠标避让，状态浮层从游戏窗口左上方显示。</p></article>
-      </div>
-    </section>
-
-    <section class="section donate">
-      <div class="donate-copy"><p class="eyebrow">Support</p><h2>反馈问题，交流配置</h2><p>QQ 交流群：<strong>958154728</strong>。欢迎反馈问题、提出建议，分享自己的角色配置。</p><p>如果工具帮你减少了重复操作，也可以扫码支持维护。打赏完全自愿，所有功能均可免费使用。</p></div>
-      <figure class="donate-code"><img src="assets/donate.jpg" alt="自愿打赏二维码" loading="lazy" width="170" height="170"><figcaption>支持 D4Helper</figcaption></figure>
-    </section>
-  </main>
-
-  <footer class="footer"><p>D4Helper · Windows · MIT License。本工具与 Blizzard Entertainment 无关联。</p><a href="https://github.com/indiefun/d4-helper">GitHub 源码</a></footer>
-</body>
+    <footer class="footer">
+      <p>© 2026 Kevin Loo · D4Helper<br />与 Blizzard Entertainment 无关联。</p>
+      <nav aria-label="页脚导航">
+        <a href="https://github.com/indiefun/d4-helper">GitHub</a
+        ><a href="https://github.com/indiefun/d4-helper/blob/master/LICENSE"
+          >GPL-3.0</a
+        ><a href="#usage">快速上手 ↑</a>
+      </nav>
+    </footer>
+  </body>
 </html>

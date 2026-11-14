@@ -1,0 +1,69 @@
+D4Helper
+Copyright (c) 2026 Kevin Loo
+Official repository: https://github.com/indiefun/d4-helper
+
+Current license
+---------------
+SPDX-License-Identifier: GPL-3.0-only
+
+Unless a file states otherwise, the project-owned code and accompanying
+materials in this revision are licensed under the GNU General Public License,
+version 3 only. The complete, unmodified license text is provided in LICENSE.
+
+D4Helper is free software: you may use, study, modify and redistribute it
+under that license. It is provided WITHOUT ANY WARRANTY, including the implied
+warranties of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Redistribution
+--------------
+When conveying covered copies or modified versions, comply with GPL-3.0,
+including preserving applicable copyright and license notices and providing a
+copy of the license. Modified versions must prominently state that they were
+modified and give the relevant date. Covered derivative works must remain
+under GPL-3.0.
+
+When distributing executable copies, provide the complete Corresponding
+Source for that exact version, including the scripts needed to build and
+install it, using one of the methods permitted by section 6. A link to an
+unrelated or newer source revision is not a substitute for Corresponding
+Source. A source archive for the exact build can be obtained from the official
+repository, or supplied alongside the executable by its distributor.
+
+Private use and private modifications do not require public source release.
+GPL-3.0 permits renamed forks, commercial use and charging for distribution;
+this project does not add a noncommercial or no-forks restriction.
+
+Attribution and project identity
+--------------------------------
+Keep the original copyright and applicable license notices. Clearly identify
+your own modifications and do not misrepresent their origin or imply that an
+unofficial build is an official D4Helper release. The GPL license does not
+grant rights under trademark law to project names or logos. These statements
+do not prohibit legitimate forks, renaming, or the freedoms granted by GPL-3.0.
+
+Previously published MIT versions
+--------------------------------
+The project through commit 7ba7280 (including release v1.7.0) was published
+under the MIT License. The original copyright and license notice are preserved
+in LICENSES/MIT-legacy.txt. This change applies to subsequent revisions
+published under GPL-3.0 and does not revoke rights already granted under MIT
+for earlier copies or portions. Earlier MIT-licensed code may still be used
+under its original terms. This is not a dual-license grant for new GPL-only
+contributions.
+
+Third-party components retain their own licenses. This notice does not
+relicense dependencies or third-party materials.
+
+中文说明
+--------
+当前版本中由本项目拥有版权的代码及随附材料（另有声明的文件除外）采用
+GNU GPL 第 3 版，仅此版本（GPL-3.0-only）。许可全文见 LICENSE。
+
+用户可免费使用，个人修改自用无需公开源码。对外分发时须遵守 GPL，包括
+保留版权及许可声明、附上许可全文；修改版须显著标注修改及日期，并继续
+按 GPL 分发。分发可执行程序时，须按 GPL 第 6 条提供与该程序准确对应的
+完整源码及构建脚本。允许改名、商业使用及收费分发，但不得冒充原创或官方。
+
+本次变更不撤销已发布版本的 MIT 授权。v1.7.0 及提交 7ba7280 以前按 MIT
+发布的代码仍可依据原 MIT 条款使用；原许可保存在 LICENSES/MIT-legacy.txt。
+新加入的 GPL 代码不因此获得 MIT 授权。第三方组件继续适用各自许可。

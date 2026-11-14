@@ -40,6 +40,10 @@ site/index.html
 site/assets/
 ```
 
-`index.html` 包含当前版本功能、Profile 切换示例、截图和使用说明，`script.js` 仅用于切换示例标签，不保存用户配置。页面无需构建工具，也不依赖外部脚本或字体。
+`index.html` 依次展示免费开源定位、角色配置交互示例、三步上手、核心功能、实际截图、开源许可、下载和常见问题。导航栏提供 GitHub 仓库直达链接；默认快捷键及常见问题使用原生折叠区域，无 JavaScript 时也可阅读。
+
+`script.js` 仅用于切换角色配置示例，支持点击和方向键、Home、End，不保存用户配置。页面无需构建工具，也不依赖外部脚本或字体。
+
+网站中的开源说明须与根目录 `LICENSE`、`NOTICE` 保持一致。当前源码为 `GPL-3.0-only`；v1.7.0 等历史 MIT 版本仍适用原许可，不能通过网站文案追溯变更旧版授权。
 
 发布版本时同步更新页面中的版本号、更新说明和 `assets/config-window.png`、`assets/overlay.png`，截图与 `docs/images/` 保持一致。下载入口使用固定的 `D4Helper-windows-latest.zip`，跟随 GitHub 最新正式版。

@@ -61,6 +61,19 @@ jobs:
           }
           Copy-Item -LiteralPath $versionedArchive -Destination ".\dist\D4Helper-windows-latest.zip" -Force
 
+      - name: Prepare corresponding source
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $sourceDirectory = Join-Path $env:RUNNER_TEMP "d4helper-source"
+          New-Item -ItemType Directory -Path $sourceDirectory -Force | Out-Null
+          $sourceArchive = Join-Path $sourceDirectory "D4Helper-source-v$env:VERSION.zip"
+          git archive --format=zip --output=$sourceArchive HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Corresponding source archive failed with exit code $LASTEXITCODE"
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -71,6 +84,10 @@ jobs:
             dist/VERSION
             dist/D4Helper-portable-v*.zip
             dist/D4Helper-windows-latest.zip
+            LICENSE
+            NOTICE
+            LICENSES/MIT-legacy.txt
+            ${{ runner.temp }}/d4helper-source/D4Helper-source-v*.zip
 
       - name: Create GitHub release
         if: github.ref_type == 'tag'
@@ -81,3 +98,4 @@ jobs:
           generate_release_notes: true
           files: |
             dist/D4Helper-windows-latest.zip
+            ${{ runner.temp }}/d4helper-source/D4Helper-source-v*.zip
