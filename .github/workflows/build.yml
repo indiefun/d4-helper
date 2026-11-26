@@ -74,21 +74,6 @@ jobs:
             throw "Corresponding source archive failed with exit code $LASTEXITCODE"
           }
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: D4Helper-windows-latest
-          path: |
-            dist/D4Helper.exe
-            dist/config.json
-            dist/VERSION
-            dist/D4Helper-portable-v*.zip
-            dist/D4Helper-windows-latest.zip
-            LICENSE
-            NOTICE
-            LICENSES/MIT-legacy.txt
-            ${{ runner.temp }}/d4helper-source/D4Helper-source-v*.zip
-
       - name: Create GitHub release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
