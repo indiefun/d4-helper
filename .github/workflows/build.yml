@@ -76,16 +76,6 @@ jobs:
             throw "Portable archive was not created: $archive"
           }
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: D4Helper-windows-latest
-          path: |
-            dist/go/D4Helper.exe
-            dist/go/workspace.timeline.json
-            dist/go/VERSION
-            dist/go/D4Helper-Studio.zip
-
       - name: Create GitHub release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
