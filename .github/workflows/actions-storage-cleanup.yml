@@ -1,0 +1,76 @@
+name: Clean up Actions build artifacts and old releases
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/actions-storage-cleanup.yml]
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clean up duplicate build packages and old published releases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const repo = context.repo;
+            const {data: latest} = await github.rest.repos.getLatestRelease(repo);
+            if (latest.tag_name !== 'v1.7.0' || latest.draft ||
+                !latest.assets.some(asset => asset.name === 'D4Helper-windows-latest.zip' && asset.size > 0)) {
+              throw new Error('Expected the v1.7.0 release and its Windows ZIP.');
+            }
+
+            const releases = await github.paginate(github.rest.repos.listReleases, repo);
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, repo);
+            const isBuildPackage = ({name}) => name === 'D4Helper-windows-latest' ||
+              name === 'D4Helper-Go-Development' || /^D4Helper-v[0-9][\w.-]*-windows$/.test(name);
+            const oldReleases = releases.filter(release => release.id !== latest.id && !release.draft);
+            const buildPackages = artifacts.filter(isBuildPackage);
+            if (oldReleases.some(release => Date.parse(release.published_at) > Date.parse(latest.published_at))) {
+              throw new Error('A release newer than v1.7.0 was published. Review the release list first.');
+            }
+
+            const failures = [];
+            let deletedPackages = 0;
+            let deletedBytes = 0;
+            let deletedReleases = 0;
+            for (const artifact of buildPackages) {
+              try {
+                await github.rest.actions.deleteArtifact({...repo, artifact_id: artifact.id});
+                deletedPackages++;
+                deletedBytes += artifact.size_in_bytes;
+              } catch (error) {
+                failures.push(`Artifact ${artifact.id}: ${error.status || error.message}`);
+              }
+            }
+            for (const release of oldReleases) {
+              try {
+                await github.rest.repos.deleteRelease({...repo, release_id: release.id});
+                deletedReleases++;
+              } catch (error) {
+                failures.push(`Release ${release.tag_name}: ${error.status || error.message}`);
+              }
+            }
+
+            const remainingReleases = await github.paginate(github.rest.repos.listReleases, repo);
+            const remainingArtifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, repo);
+            const remainingBuildPackages = remainingArtifacts.filter(isBuildPackage);
+            if (!remainingReleases.some(release => release.id === latest.id) ||
+                remainingReleases.some(release => release.id !== latest.id && !release.draft)) {
+              failures.push('Published release list does not contain exactly v1.7.0.');
+            }
+            if (remainingBuildPackages.length) {
+              failures.push(`${remainingBuildPackages.length} build packages are still present.`);
+            }
+
+            const report = `Kept ${latest.tag_name}. Deleted ${deletedReleases} releases, ` +
+              `${deletedPackages} Actions artifacts (${deletedBytes} bytes). ` +
+              `${remainingArtifacts.length} Actions artifacts remain.`;
+            core.notice(report);
+            await core.summary.addHeading('Cleanup result').addRaw(report, true)
+              .addList(failures).write();
+            if (failures.length) core.setFailed(failures.join('\n'));
